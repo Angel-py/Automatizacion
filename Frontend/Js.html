@@ -1,0 +1,1153 @@
+<!-- Scripts -->
+<script src="https://cdn.jsdelivr.net/npm/flowbite@2.5.2/dist/flowbite.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+
+<script>
+  let preguntas = [];
+  let respuestas = {};
+  let indiceActual = 0;
+  let isSubmitting = false;
+
+  google.script.run.withSuccessHandler(inicializarFormulario).obtenerPreguntas();
+
+  function inicializarFormulario(preguntasData) {
+    preguntas = preguntasData;
+    actualizarContador();
+    mostrarPreguntaActual();
+
+    document.getElementById('btnSiguiente').addEventListener('click', siguientePregunta);
+    document.getElementById('btnAnterior').addEventListener('click', anteriorPregunta);
+
+    document.addEventListener('keypress', function (e) {
+      if (e.key === 'Enter' && !isSubmitting) {
+        const activeElement = document.activeElement;
+        if (activeElement.tagName !== 'TEXTAREA') {
+          e.preventDefault();
+          siguientePregunta();
+        }
+      }
+    });
+  }
+
+  function mostrarPreguntaActual() {
+    const container = document.getElementById('questionsContainer');
+    const pregunta = preguntas[indiceActual];
+
+    if (!pregunta) return;
+
+    container.style.opacity = '0';
+    container.style.transform = 'translateX(20px)';
+
+    setTimeout(() => {
+      container.innerHTML = generarHTMLPregunta(pregunta);
+
+      if (respuestas[pregunta.id]) {
+        const campo = document.querySelector(`#respuesta_${pregunta.id}`);
+        if (campo) campo.value = respuestas[pregunta.id];
+      }
+
+      const campo = document.querySelector('input, textarea, select');
+      if (campo && !campo.value) campo.focus();
+
+      container.style.transition = 'all 0.3s ease';
+      container.style.opacity = '1';
+      container.style.transform = 'translateX(0)';
+    }, 150);
+
+    document.getElementById('btnAnterior').classList.toggle('hidden', indiceActual === 0);
+
+    const btnSiguiente = document.getElementById('btnSiguiente');
+    const isLast = indiceActual === preguntas.length - 1;
+    btnSiguiente.innerHTML = isLast ?
+      '<i class="fas fa-check-circle mr-2"></i> Finalizar y Optimizar' :
+      'Siguiente <i class="fas fa-arrow-right ml-2"></i>';
+
+    actualizarContador();
+  }
+
+  function getIconForType(tipo) {
+    const icons = {
+      'textarea': 'fa-align-left',
+      'select': 'fa-chevron-down',
+      'number': 'fa-hashtag',
+      'text': 'fa-pencil-alt',
+      'dynamic-list': 'fa-list-ul',
+      'dynamic-table': 'fa-table',
+      'dynamic-keyvalue': 'fa-code-branch',
+      'dynamic-tags': 'fa-tags',
+      'foda-opportunities-threats': 'fa-chart-line'
+    };
+    return icons[tipo] || 'fa-question-circle';
+  }
+
+  function generarHTMLPregunta(pregunta) {
+    let campoHTML = '';
+    const fieldId = `respuesta_${pregunta.id}`;
+
+    switch (pregunta.tipo) {
+      case 'textarea':
+        campoHTML = `
+            <textarea id="${fieldId}" 
+                      rows="5"
+                      class="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:border-accent focus:ring-4 focus:ring-accent focus:ring-opacity-20 transition-all duration-300 resize-none"
+                      placeholder="Escribe tu respuesta detallada aquí..."></textarea>
+            <div class="mt-2 text-xs text-gray-500 flex items-center">
+              <i class="fas fa-info-circle mr-1 text-accent"></i> Sugerencia: Sé específico y detallado
+            </div>
+          `;
+        break;
+
+      case 'dynamic-list':
+        campoHTML = `
+              <div id="dynamic-list-${pregunta.id}" class="space-y-3">
+                <div class="dynamic-item flex gap-2">
+                  <input type="text" 
+                        class="flex-1 px-4 py-3 border-2 border-gray-300 rounded-xl focus:border-secondary focus:ring-4 focus:ring-secondary focus:ring-opacity-20 transition-all duration-300"
+                        placeholder="${pregunta.itemPlaceholder || 'Ingresa un item...'}">
+                  <button type="button" 
+                          onclick="removeDynamicItem(this)"
+                          class="px-4 py-3 bg-red-100 hover:bg-red-200 text-red-600 rounded-xl transition-all duration-300">
+                    <i class="fas fa-trash-alt"></i>
+                  </button>
+                </div>
+                <button type="button" 
+                        onclick="addDynamicItem(${pregunta.id})"
+                        class="mt-2 px-4 py-2 bg-secondary bg-opacity-10 hover:bg-opacity-20 text-secondary rounded-lg transition-all duration-300 text-sm font-semibold">
+                  <i class="fas fa-plus-circle mr-2"></i>Agregar ${pregunta.itemLabel || 'item'}
+                </button>
+                <div class="mt-2 text-xs text-gray-500 flex items-center">
+                  <i class="fas fa-layer-group mr-1 text-accent"></i> Puedes agregar múltiples elementos
+                </div>
+              </div>
+              <input type="hidden" id="${fieldId}" name="${fieldId}">
+            `;
+        break;
+
+      case 'dynamic-table':
+        const columns = pregunta.columns || [];
+        const kvLimits  = pregunta.limits || { min: 1, max: 20 };
+
+
+        campoHTML = `
+        <div id="dynamic-table-${pregunta.id}" 
+             class="overflow-x-auto"
+             data-min="${kvLimits.min}" 
+             data-max="${kvLimits.max}">
+          <table class="min-w-full bg-white border border-gray-200 rounded-xl">
+            <thead class="bg-gray-50">
+              <tr>
+                ${columns.map(col => `
+                  <th class="px-4 py-3 text-left text-sm font-semibold text-gray-700 border-b">
+                    <div class="flex items-center space-x-1">
+                      <span>${col.name}</span>
+                      ${col.required ? '<span class="text-red-500 text-xs">*</span>' : ''}
+                      ${col.help ? `
+                        <div class="group relative inline-block">
+                          <i class="fas fa-question-circle text-gray-400 text-xs cursor-help"></i>
+                          <div class="hidden group-hover:block absolute z-10 w-64 p-2 mt-1 text-xs text-white bg-gray-800 rounded-lg shadow-lg -left-32">
+                            ${col.help}
+                          </div>
+                        </div>
+                      ` : ''}
+                    </div>
+                  </th>
+                `).join('')}
+                <th class="px-4 py-3 text-left text-sm font-semibold text-gray-700 border-b w-12"></th>
+              </tr>
+            </thead>
+            <tbody id="table-body-${pregunta.id}">
+              ${generarFilaTabla(columns, pregunta.id, 0)}
+            </tbody>
+          </table>
+          
+          <div class="flex justify-between items-center mt-4">
+            <button type="button" 
+                    onclick="addTableRow(${pregunta.id})"
+                    id="btn-add-table-${pregunta.id}"
+                    class="px-4 py-2 bg-secondary bg-opacity-10 hover:bg-opacity-20 text-secondary rounded-lg transition-all duration-300 text-sm font-semibold">
+              <i class="fas fa-plus-circle mr-2"></i>Agregar área / producto
+            </button>
+            <span id="table-counter-${pregunta.id}" class="text-xs text-gray-500">
+              1 / ${kvLimits.max}
+            </span>
+          </div>
+          
+          <div class="mt-2 text-xs text-gray-500 flex items-center">
+            <i class="fas fa-chart-line mr-1 text-accent"></i> 
+            Mínimo: ${kvLimits.min} ${kvLimits.min === 1 ? 'área' : 'áreas'} | Máximo: ${kvLimits.max} áreas
+          </div>
+        </div>
+        <input type="hidden" id="${fieldId}" name="${fieldId}">
+      `;
+        break;
+
+      case 'dynamic-keyvalue':
+
+        const keyConfig = pregunta.keyConfig || {
+          type: "text",
+          placeholder: "Clave",
+          required: true
+        };
+
+        const valueConfig = pregunta.valueConfig || {
+          type: "text",
+          placeholder: "Valor",
+          required: true
+        };
+
+        const limits = pregunta.limits || {
+          min: 1,
+          max: 20
+        };
+
+        campoHTML = `
+          <div id="dynamic-kv-${pregunta.id}" 
+              class="space-y-3" 
+              data-min="${limits.min}" 
+              data-max="${limits.max}"
+              data-pregunta-id="${pregunta.id}">
+            <div class="kv-item flex gap-2 items-start">
+              ${generarInputKeyValue(keyConfig, 'key', pregunta.id, 0)}
+              ${generarInputKeyValue(valueConfig, 'value', pregunta.id, 0)}
+              <button type="button" 
+                      onclick="removeKVItem(this, ${pregunta.id})"
+                      class="px-4 py-3 bg-red-100 hover:bg-red-200 text-red-600 rounded-xl transition-all duration-300">
+                <i class="fas fa-trash-alt"></i>
+              </button>
+            </div>
+            <div class="flex justify-between items-center">
+              <button type="button" 
+                      onclick="addKVItem(${pregunta.id})"
+                      id="btn-add-kv-${pregunta.id}"
+                      class="px-4 py-2 bg-secondary bg-opacity-10 hover:bg-opacity-20 text-secondary rounded-lg transition-all duration-300 text-sm font-semibold">
+                <i class="fas fa-plus-circle mr-2"></i>Agregar par
+              </button>
+              <span id="kv-counter-${pregunta.id}" class="text-xs text-gray-500">
+                1 / ${limits.max}
+              </span>
+            </div>
+            <div class="mt-2 text-xs text-gray-500 flex items-center">
+              <i class="fas fa-info-circle mr-1 text-accent"></i> 
+              Mínimo: ${limits.min} par(es) | Máximo: ${limits.max} par(es)
+            </div>
+          </div>
+          <input type="hidden" id="${fieldId}" name="${fieldId}">
+        `;
+        break;
+
+      case 'dynamic-tags':
+        campoHTML = `
+        <div id="dynamic-tags-${pregunta.id}" class="space-y-3">
+          <div class="tags-container flex flex-wrap gap-2 mb-3" id="tags-container-${pregunta.id}">
+            <!-- Tags se agregarán aquí dinámicamente -->
+          </div>
+          <div class="flex gap-2">
+            <input type="text" 
+                   id="tag-input-${pregunta.id}"
+                   class="flex-1 px-4 py-3 border-2 border-gray-300 rounded-xl focus:border-secondary focus:ring-4 focus:ring-secondary focus:ring-opacity-20 transition-all duration-300"
+                   placeholder="${pregunta.tagPlaceholder || 'Escribe una etiqueta y presiona Enter...'}"
+                   onkeypress="handleTagKeyPress(event, ${pregunta.id})">
+            <button type="button" 
+                    onclick="addTag(${pregunta.id})"
+                    class="px-6 py-3 bg-secondary hover:bg-secondary-dark text-white rounded-xl transition-all duration-300 font-semibold">
+              <i class="fas fa-plus"></i>
+            </button>
+          </div>
+          <div class="mt-2 text-xs text-gray-500 flex items-center">
+            <i class="fas fa-tags mr-1 text-accent"></i> Presiona Enter o haz clic en + para agregar
+          </div>
+        </div>
+        <input type="hidden" id="${fieldId}" name="${fieldId}">
+      `;
+        break;
+
+      case 'select':
+        let options = '<option value="">Selecciona una opción...</option>';
+        pregunta.opciones.forEach(op => {
+          options += `<option value="${op}">${op}</option>`;
+        });
+        campoHTML = `
+            <select id="${fieldId}" 
+                    class="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:border-accent focus:ring-4 focus:ring-accent focus:ring-opacity-20 transition-all duration-300 cursor-pointer">
+              ${options}
+            </select>
+          `;
+        break;
+
+      case 'number':
+        campoHTML = `
+            <input type="number" 
+                  id="${fieldId}"
+                  class="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:border-accent focus:ring-4 focus:ring-accent focus:ring-opacity-20 transition-all duration-300"
+                  placeholder="Ingresa un valor numérico...">
+          `;
+        break;
+
+      default:
+        campoHTML = `
+            <input type="text" 
+                  id="${fieldId}"
+                  class="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:border-accent focus:ring-4 focus:ring-accent focus:ring-opacity-20 transition-all duration-300"
+                  placeholder="Escribe tu respuesta aquí...">
+          `;
+    }
+
+    const iconos = {
+      text: 'fa-pencil-alt',
+      textarea: 'fa-align-left',
+      select: 'fa-chevron-down',
+      number: 'fa-hashtag'
+    };
+
+
+    return `
+      <div class="animate-slide-up">
+        <div class="mb-4 flex items-start space-x-3">
+          <div class="flex-shrink-0 w-10 h-10 bg-secondary rounded-xl flex items-center justify-center text-white shadow-lg">
+            <i class="fas ${getIconForType(pregunta.tipo)} text-lg"></i>
+          </div>
+          <div class="flex-1">
+            <label class="block text-xl font-bold text-primary mb-3">
+              ${pregunta.numero}. ${pregunta.texto}
+            </label>
+            ${campoHTML}
+          </div>
+        </div>
+        ${pregunta.ayuda ? `
+          <div class="ml-13 mt-3 p-3 bg-accent bg-opacity-5 rounded-lg border border-accent border-opacity-20">
+            <i class="fas fa-lightbulb text-accent mr-2"></i>
+            <span class="text-sm text-gray-700">${pregunta.ayuda}</span>
+          </div>
+        ` : ''}
+      </div>
+    `;
+  }
+
+
+  function guardarRespuestaActual() {
+    const pregunta = preguntas[indiceActual];
+    if (pregunta) {
+      const campo = document.querySelector(`#respuesta_${pregunta.id}`);
+      if (campo) {
+        respuestas[pregunta.id] = campo.value;
+      }
+    }
+  }
+
+  function siguientePregunta() {
+    if (isSubmitting) return;
+
+    const guardadoExitoso = guardarRespuestaActual();
+    if (!guardadoExitoso) return;
+
+    const pregunta = preguntas[indiceActual];
+    const respuesta = respuestas[pregunta.id];
+
+    // Validar respuesta no vacía para tipos no dinámicos
+    if (pregunta.tipo !== 'dynamic-keyvalue' && (!respuesta || respuesta.trim() === '')) {
+      mostrarToast('Por favor, responde la pregunta antes de continuar', 'warning');
+      const campo = document.querySelector(`#respuesta_${pregunta.id}`);
+      if (campo) {
+        campo.classList.add('border-secondary', 'bg-secondary', 'bg-opacity-5');
+        setTimeout(() => {
+          campo.classList.remove('border-secondary', 'bg-secondary', 'bg-opacity-5');
+        }, 2000);
+      }
+      return;
+    }
+
+    if (indiceActual === preguntas.length - 1) {
+      finalizarFormulario();
+    } else {
+      indiceActual++;
+      mostrarPreguntaActual();
+      actualizarProgreso();
+    }
+  }
+
+  function anteriorPregunta() {
+    guardarRespuestaActual();
+    indiceActual--;
+    mostrarPreguntaActual();
+    actualizarProgreso();
+  }
+
+  function actualizarProgreso() {
+    const progreso = ((indiceActual + 1) / preguntas.length) * 100;
+    document.getElementById('progressBar').style.width = `${progreso}%`;
+    document.getElementById('progresoPorcentaje').textContent = `${Math.round(progreso)}%`;
+  }
+
+  function actualizarContador() {
+    document.getElementById('preguntaContador').innerHTML = `
+        Pregunta ${indiceActual + 1} de ${preguntas.length}
+      `;
+  }
+
+  async function finalizarFormulario() {
+    guardarRespuestaActual();
+    isSubmitting = true;
+
+    const loadingOverlay = document.getElementById('loadingOverlay');
+    loadingOverlay.classList.remove('hidden');
+    loadingOverlay.classList.add('flex');
+
+    const messages = [
+      'Analizando respuestas...',
+      'Aplicando inteligencia artificial...',
+      'Optimizando redacción...',
+      'Generando insights...',
+      'Actualizando presentaciones...'
+    ];
+    let msgIndex = 0;
+    const msgInterval = setInterval(() => {
+      document.getElementById('loadingMessage').textContent = messages[msgIndex % messages.length];
+      msgIndex++;
+    }, 2000);
+
+    try {
+      const respuestasOptimizadas = await new Promise((resolve, reject) => {
+        google.script.run
+          .withSuccessHandler(resolve)
+          .withFailureHandler(reject)
+          .optimizarRespuestasConIA(respuestas);
+      });
+
+      await new Promise((resolve, reject) => {
+        google.script.run
+          .withSuccessHandler(resolve)
+          .withFailureHandler(reject)
+          .guardarRespuestasEnSlides(respuestasOptimizadas);
+      });
+
+      clearInterval(msgInterval);
+      loadingOverlay.classList.add('hidden');
+
+      Swal.fire({
+        title: '¡Éxito!',
+        text: 'Los datos han sido procesados y las diapositivas actualizadas correctamente',
+        icon: 'success',
+        confirmButtonText: '<i class="fas fa-check mr-2"></i>Finalizar',
+        confirmButtonColor: '#6366f1',
+        background: 'white',
+        backdrop: true,
+        timer: 3000,
+        timerProgressBar: true
+      }).then(() => {
+        google.script.host.close();
+      });
+
+    } catch (error) {
+      clearInterval(msgInterval);
+      loadingOverlay.classList.add('hidden');
+
+      Swal.fire({
+        title: 'Error',
+        text: error.message || 'Ocurrió un error al procesar los datos',
+        icon: 'error',
+        confirmButtonText: 'Intentar de nuevo',
+        confirmButtonColor: '#ef4444'
+      });
+
+      isSubmitting = false;
+    }
+  }
+
+  function mostrarToast(mensaje, tipo = 'info') {
+    const toastContainer = document.getElementById('toastContainer');
+    const toast = document.createElement('div');
+
+    const colores = {
+      success: 'bg-green-500',
+      error: 'bg-red-500',
+      warning: 'bg-yellow-500',
+      info: 'bg-blue-500'
+    };
+
+    const iconos = {
+      success: 'fa-check-circle',
+      error: 'fa-exclamation-circle',
+      warning: 'fa-exclamation-triangle',
+      info: 'fa-info-circle'
+    };
+
+    toast.className = `${colores[tipo]} text-white px-6 py-3 rounded-lg shadow-lg flex items-center space-x-3 animate-slide-up`;
+    toast.innerHTML = `
+        <i class="fas ${iconos[tipo]} text-xl"></i>
+        <span>${mensaje}</span>
+      `;
+
+    toastContainer.appendChild(toast);
+
+    setTimeout(() => {
+      toast.style.opacity = '0';
+      toast.style.transform = 'translateX(100px)';
+      toast.style.transition = 'all 0.3s ease';
+      setTimeout(() => toast.remove(), 300);
+    }, 3000);
+  }
+
+
+  function addDynamicItem(preguntaId) {
+    const container = document.getElementById(`dynamic-list-${preguntaId}`);
+    const newItem = document.createElement('div');
+    newItem.className = 'dynamic-item flex gap-2 mt-2';
+    newItem.innerHTML = `
+    <input type="text" 
+           class="flex-1 px-4 py-3 border-2 border-gray-300 rounded-xl focus:border-secondary focus:ring-4 focus:ring-secondary focus:ring-opacity-20 transition-all duration-300"
+           placeholder="Ingresa un item...">
+    <button type="button" 
+            onclick="removeDynamicItem(this)"
+            class="px-4 py-3 bg-red-100 hover:bg-red-200 text-red-600 rounded-xl transition-all duration-300">
+      <i class="fas fa-trash-alt"></i>
+    </button>
+  `;
+    container.insertBefore(newItem, container.lastElementChild);
+    updateHiddenField(preguntaId);
+  }
+
+  function removeDynamicItem(button) {
+    const item = button.closest('.dynamic-item');
+    const container = item.parentElement;
+    if (container.children.length > 2) { // Mantener al menos un item
+      item.remove();
+      const preguntaId = container.id.split('-').pop();
+      updateHiddenField(preguntaId);
+    } else {
+      mostrarToast('Debe haber al menos un item', 'warning');
+    }
+  }
+
+
+  let tableValidations = {};
+
+
+  // Funciones para Dynamic Table
+  function addTableRow(preguntaId) {
+    const container = document.getElementById(`dynamic-table-${preguntaId}`);
+    const tbody = document.getElementById(`table-body-${preguntaId}`);
+    const max = parseInt(container.dataset.max);
+    const currentRows = tbody.querySelectorAll('.table-row').length;
+
+    if (currentRows >= max) {
+      mostrarToast(`Máximo ${max} áreas permitidas`, 'warning');
+      return;
+    }
+
+    const pregunta = preguntas.find(p => p.id === preguntaId);
+    const columns = pregunta.columns;
+    const newRowIndex = currentRows;
+
+    const newRow = document.createElement('tr');
+    newRow.className = 'table-row hover:bg-gray-50 transition-colors';
+    newRow.setAttribute('data-row-index', newRowIndex);
+    newRow.innerHTML = `
+    ${columns.map((col, colIndex) => {
+      const inputId = `cell_${preguntaId}_${newRowIndex}_${colIndex}`;
+
+      switch (col.type) {
+        case 'select':
+          return `
+            <td class="px-4 py-2 border-b">
+              <select class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-secondary focus:ring-2 focus:ring-secondary focus:ring-opacity-20 transition-all"
+                      data-pregunta="${preguntaId}"
+                      data-row="${newRowIndex}"
+                      data-col="${colIndex}"
+                      data-col-name="${col.name}"
+                      ${col.required ? 'required' : ''}>
+                <option value="">${col.placeholder || 'Selecciona...'}</option>
+                ${col.options.map(opt => `<option value="${opt}">${opt}</option>`).join('')}
+              </select>
+            </td>
+          `;
+        case 'textarea':
+          return `
+            <td class="px-4 py-2 border-b">
+              <textarea rows="3"
+                        class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-secondary focus:ring-2 focus:ring-secondary focus:ring-opacity-20 transition-all resize-none"
+                        placeholder="${col.placeholder || 'Describe...'}"
+                        data-pregunta="${preguntaId}"
+                        data-row="${newRowIndex}"
+                        data-col="${colIndex}"
+                        data-col-name="${col.name}"
+                        ${col.required ? 'required' : ''}></textarea>
+            </td>
+          `;
+        default:
+          return `
+            <td class="px-4 py-2 border-b">
+              <input type="${col.type || 'text'}" 
+                     class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-secondary focus:ring-2 focus:ring-secondary focus:ring-opacity-20 transition-all"
+                     placeholder="${col.placeholder || 'Ingresa información...'}"
+                     data-pregunta="${preguntaId}"
+                     data-row="${newRowIndex}"
+                     data-col="${colIndex}"
+                     data-col-name="${col.name}"
+                     ${col.required ? 'required' : ''}>
+            </td>
+          `;
+      }
+    }).join('')}
+    <td class="px-4 py-2 border-b text-center">
+      <button type="button" 
+              onclick="removeTableRow(this, ${preguntaId})"
+              class="text-red-500 hover:text-red-700 transition-colors">
+        <i class="fas fa-times-circle text-lg"></i>
+      </button>
+    </td>
+  `;
+
+    tbody.appendChild(newRow);
+    updateTableCounter(preguntaId);
+    updateTableHiddenField(preguntaId);
+  }
+
+
+  function removeTableRow(button, preguntaId) {
+    const row = button.closest('tr');
+    const tbody = row.parentElement;
+    const container = document.getElementById(`dynamic-table-${preguntaId}`);
+    const min = parseInt(container.dataset.min);
+    const currentRows = tbody.querySelectorAll('.table-row').length;
+
+    if (currentRows <= min) {
+      mostrarToast(`Mínimo ${min} ${min === 1 ? 'área' : 'áreas'} requerida(s)`, 'warning');
+      return;
+    }
+
+    row.remove();
+
+    // Reindexar filas restantes
+    const rows = tbody.querySelectorAll('.table-row');
+    rows.forEach((row, newIndex) => {
+      row.setAttribute('data-row-index', newIndex);
+      const inputs = row.querySelectorAll('input, select, textarea');
+      inputs.forEach(input => {
+        input.setAttribute('data-row', newIndex);
+      });
+    });
+
+    updateTableCounter(preguntaId);
+    updateTableHiddenField(preguntaId);
+  }
+
+  function updateTableHiddenField(preguntaId) {
+    const hiddenField = document.getElementById(`respuesta_${preguntaId}`);
+    const tbody = document.getElementById(`table-body-${preguntaId}`);
+    const pregunta = preguntas.find(p => p.id === preguntaId);
+    const columns = pregunta.columns;
+    const tableData = [];
+
+    const rows = tbody.querySelectorAll('.table-row');
+    rows.forEach((row, rowIndex) => {
+      const rowData = {};
+      columns.forEach((col, colIndex) => {
+        const input = row.querySelector(`[data-col="${colIndex}"]`);
+        if (input) {
+          let value = '';
+          if (input.tagName === 'SELECT') {
+            value = input.options[input.selectedIndex]?.text || '';
+          } else {
+            value = input.value.trim();
+          }
+          if (value) {
+            rowData[col.name] = value;
+          }
+        }
+      });
+      if (Object.keys(rowData).length > 0) {
+        tableData.push(rowData);
+      }
+    });
+
+    if (hiddenField) {
+      hiddenField.value = JSON.stringify(tableData);
+    }
+  }
+
+  function validarTablaRequeridos(preguntaId) {
+    const tbody = document.getElementById(`table-body-${preguntaId}`);
+    const container = document.getElementById(`dynamic-table-${preguntaId}`);
+    const min = parseInt(container.dataset.min);
+    const rows = tbody.querySelectorAll('.table-row');
+    const pregunta = preguntas.find(p => p.id === preguntaId);
+    const columns = pregunta.columns;
+    let isValid = true;
+    let errorMessages = [];
+
+    // Validar cantidad mínima de filas
+    if (rows.length < min) {
+      isValid = false;
+      errorMessages.push(`Mínimo ${min} ${min === 1 ? 'área' : 'áreas'} requerida(s)`);
+    }
+
+    // Validar campos requeridos en cada fila
+    rows.forEach((row, rowIndex) => {
+      columns.forEach((col, colIndex) => {
+        if (col.required) {
+          const input = row.querySelector(`[data-col="${colIndex}"]`);
+          if (input) {
+            let value = '';
+            if (input.tagName === 'SELECT') {
+              value = input.value;
+            } else {
+              value = input.value.trim();
+            }
+
+            if (!value) {
+              isValid = false;
+              errorMessages.push(`Fila ${rowIndex + 1}: El campo "${col.name}" es requerido`);
+              input.classList.add('border-red-500', 'bg-red-50');
+            } else {
+              input.classList.remove('border-red-500', 'bg-red-50');
+            }
+          }
+        }
+      });
+    });
+
+    if (!isValid) {
+      mostrarToast(errorMessages.join(', '), 'error');
+      return false;
+    }
+
+    return true;
+  }
+
+  function updateTableCounter(preguntaId) {
+    const tbody = document.getElementById(`table-body-${preguntaId}`);
+    const container = document.getElementById(`dynamic-table-${preguntaId}`);
+    const currentRows = tbody.querySelectorAll('.table-row').length;
+    const max = parseInt(container.dataset.max);
+    const counter = document.getElementById(`table-counter-${preguntaId}`);
+
+    if (counter) {
+      counter.textContent = `${currentRows} / ${max}`;
+    }
+
+    const addButton = document.getElementById(`btn-add-table-${preguntaId}`);
+    if (addButton) {
+      if (currentRows >= max) {
+        addButton.disabled = true;
+        addButton.classList.add('opacity-50', 'cursor-not-allowed');
+      } else {
+        addButton.disabled = false;
+        addButton.classList.remove('opacity-50', 'cursor-not-allowed');
+      }
+    }
+  }
+
+
+  // Variables para almacenar datos de validación
+  let kvValidations = {};
+
+  // Funciones para Dynamic Key-Value
+  function addKVItem(preguntaId) {
+    const container = document.getElementById(`dynamic-kv-${preguntaId}`);
+    const max = parseInt(container.dataset.max);
+    const currentItems = container.querySelectorAll('.kv-item').length;
+
+    // Validar límite máximo
+    if (currentItems >= max) {
+      mostrarToast(`Máximo ${max} pares permitidos`, 'warning');
+      return;
+    }
+
+    // Obtener configuraciones de la pregunta original
+    const pregunta = preguntas.find(p => p.id === preguntaId);
+    const keyConfig = pregunta.keyConfig;
+    const valueConfig = pregunta.valueConfig;
+    const newIndex = currentItems;
+
+    const newItem = document.createElement('div');
+    newItem.className = 'kv-item flex gap-2 items-start mt-2';
+    newItem.innerHTML = `
+    ${generarInputKeyValue(keyConfig, 'key', preguntaId, newIndex)}
+    ${generarInputKeyValue(valueConfig, 'value', preguntaId, newIndex)}
+    <button type="button" 
+            onclick="removeKVItem(this, ${preguntaId})"
+            class="px-4 py-3 bg-red-100 hover:bg-red-200 text-red-600 rounded-xl transition-all duration-300">
+      <i class="fas fa-trash-alt"></i>
+    </button>
+  `;
+
+    const buttonContainer = container.querySelector('.flex.justify-between');
+    container.insertBefore(newItem, buttonContainer);
+
+    updateKVCounter(preguntaId);
+    updateHiddenField(preguntaId);
+  }
+
+  function removeKVItem(button, preguntaId) {
+    const item = button.closest('.kv-item');
+    const container = document.getElementById(`dynamic-kv-${preguntaId}`);
+    const min = parseInt(container.dataset.min);
+    const currentItems = container.querySelectorAll('.kv-item').length;
+
+    // Validar límite mínimo
+    if (currentItems <= min) {
+      mostrarToast(`Mínimo ${min} par(es) requerido(s)`, 'warning');
+      return;
+    }
+
+    item.remove();
+
+    // Reindexar los inputs restantes
+    reindexKVItems(preguntaId);
+    updateKVCounter(preguntaId);
+    updateHiddenField(preguntaId);
+  }
+
+  function reindexKVItems(preguntaId) {
+    const container = document.getElementById(`dynamic-kv-${preguntaId}`);
+    const items = container.querySelectorAll('.kv-item');
+
+    items.forEach((item, newIndex) => {
+      // Actualizar todos los inputs dentro del item
+      const inputs = item.querySelectorAll('input, select, textarea');
+      inputs.forEach(input => {
+        const currentType = input.getAttribute('data-type');
+        if (currentType) {
+          input.setAttribute('data-index', newIndex);
+          // Actualizar name si es necesario
+          const name = `${currentType}_${preguntaId}_${newIndex}`;
+          input.setAttribute('name', name);
+        }
+      });
+    });
+  }
+
+  function updateKVCounter(preguntaId) {
+    const container = document.getElementById(`dynamic-kv-${preguntaId}`);
+    const currentItems = container.querySelectorAll('.kv-item').length;
+    const max = parseInt(container.dataset.max);
+    const counter = document.getElementById(`kv-counter-${preguntaId}`);
+
+    if (counter) {
+      counter.textContent = `${currentItems} / ${max}`;
+    }
+
+    // Habilitar/deshabilitar botón de agregar según límite
+    const addButton = document.getElementById(`btn-add-kv-${preguntaId}`);
+    if (addButton) {
+      if (currentItems >= max) {
+        addButton.disabled = true;
+        addButton.classList.add('opacity-50', 'cursor-not-allowed');
+      } else {
+        addButton.disabled = false;
+        addButton.classList.remove('opacity-50', 'cursor-not-allowed');
+      }
+    }
+  }
+
+  // Funciones para Dynamic Tags
+  let tagsData = {};
+
+  function addTag(preguntaId) {
+    const input = document.getElementById(`tag-input-${preguntaId}`);
+    const tagValue = input.value.trim();
+
+    if (!tagValue) {
+      mostrarToast('Por favor escribe una etiqueta', 'warning');
+      return;
+    }
+
+    if (!tagsData[preguntaId]) {
+      tagsData[preguntaId] = [];
+    }
+
+    if (tagsData[preguntaId].includes(tagValue)) {
+      mostrarToast('Esta etiqueta ya existe', 'warning');
+      return;
+    }
+
+    tagsData[preguntaId].push(tagValue);
+
+    const container = document.getElementById(`tags-container-${preguntaId}`);
+    const tagElement = document.createElement('span');
+    tagElement.className = 'inline-flex items-center gap-2 px-3 py-1.5 bg-secondary bg-opacity-10 text-secondary rounded-full text-sm font-medium';
+    tagElement.innerHTML = `
+    ${tagValue}
+    <button type="button" 
+            onclick="removeTag(${preguntaId}, '${tagValue}')"
+            class="hover:text-red-600 transition-colors">
+      <i class="fas fa-times-circle text-xs"></i>
+    </button>
+  `;
+    container.appendChild(tagElement);
+
+    input.value = '';
+    updateHiddenField(preguntaId);
+  }
+
+  function handleTagKeyPress(event, preguntaId) {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      addTag(preguntaId);
+    }
+  }
+
+  function removeTag(preguntaId, tagValue) {
+    tagsData[preguntaId] = tagsData[preguntaId].filter(t => t !== tagValue);
+    const container = document.getElementById(`tags-container-${preguntaId}`);
+    const tagElements = container.querySelectorAll('span');
+    tagElements.forEach(tag => {
+      if (tag.textContent.replace('×', '').trim() === tagValue) {
+        tag.remove();
+      }
+    });
+    updateHiddenField(preguntaId);
+  }
+
+  // Función para actualizar campo hidden con todos los valores
+  function updateHiddenField(preguntaId) {
+    const hiddenField = document.getElementById(`respuesta_${preguntaId}`);
+    const container = document.getElementById(`dynamic-kv-${preguntaId}`);
+    const kvData = {};
+
+    container.querySelectorAll('.kv-item').forEach(item => {
+      const keyInput = item.querySelector('[data-type="key"]');
+      const valueInput = item.querySelector('[data-type="value"]');
+
+      let key = '';
+      let value = '';
+
+      // Obtener valor según tipo de input
+      if (keyInput) {
+        key = keyInput.value.trim();
+      }
+
+      if (valueInput) {
+        if (valueInput.type === 'select-one') {
+          value = valueInput.options[valueInput.selectedIndex]?.text || '';
+        } else {
+          value = valueInput.value.trim();
+        }
+      }
+
+      if (key && value) {
+        kvData[key] = value;
+      }
+    });
+
+    if (hiddenField) {
+      hiddenField.value = JSON.stringify(kvData);
+    }
+  }
+
+  function validarCamposRequeridosKV(preguntaId) {
+    const container = document.getElementById(`dynamic-kv-${preguntaId}`);
+    const items = container.querySelectorAll('.kv-item');
+    const min = parseInt(container.dataset.min);
+    let isValid = true;
+    let errorMessages = [];
+
+    // Validar cantidad mínima
+    if (items.length < min) {
+      isValid = false;
+      errorMessages.push(`Mínimo ${min} par(es) requerido(s)`);
+    }
+
+    // Validar campos requeridos
+    items.forEach((item, idx) => {
+      const keyInput = item.querySelector('[data-type="key"]');
+      const valueInput = item.querySelector('[data-type="value"]');
+
+      if (keyInput && keyInput.hasAttribute('required') && !keyInput.value.trim()) {
+        isValid = false;
+        errorMessages.push(`Par ${idx + 1}: El campo clave es requerido`);
+        keyInput.classList.add('border-red-500', 'bg-red-50');
+      } else if (keyInput) {
+        keyInput.classList.remove('border-red-500', 'bg-red-50');
+      }
+
+      if (valueInput && valueInput.hasAttribute('required') && !valueInput.value.trim()) {
+        isValid = false;
+        errorMessages.push(`Par ${idx + 1}: El campo valor es requerido`);
+        valueInput.classList.add('border-red-500', 'bg-red-50');
+      } else if (valueInput) {
+        valueInput.classList.remove('border-red-500', 'bg-red-50');
+      }
+    });
+
+    if (!isValid) {
+      mostrarToast(errorMessages.join(', '), 'error');
+      return false;
+    }
+
+    return true;
+  }
+
+
+  // Sobrescribir guardarRespuestaActual para manejar campos dinámicos
+  function guardarRespuestaActual() {
+    const pregunta = preguntas[indiceActual];
+    if (pregunta) {
+      if (pregunta.tipo === 'dynamic-keyvalue') {
+        // Validar campos antes de guardar
+        if (!validarCamposRequeridosKV(pregunta.id)) {
+          return false;
+        }
+        updateHiddenField(pregunta.id);
+        const hiddenField = document.getElementById(`respuesta_${pregunta.id}`);
+        if (hiddenField && hiddenField.value) {
+          respuestas[pregunta.id] = hiddenField.value;
+        }
+      } else {
+        const campo = document.querySelector(`#respuesta_${pregunta.id}`);
+        if (campo) {
+          respuestas[pregunta.id] = campo.value;
+        }
+      }
+    }
+    return true;
+  }
+
+  function generarInputKeyValue(config, type, preguntaId, index) {
+    const baseClass = "flex-1 px-4 py-3 border-2 border-gray-300 rounded-xl focus:border-secondary focus:ring-4 focus:ring-secondary focus:ring-opacity-20 transition-all duration-300";
+    const requiredAttr = config.required ? 'required' : '';
+    const fieldName = `${type}_${preguntaId}_${index}`;
+
+    switch (config.type) {
+      case 'select':
+        return `
+        <select class="${baseClass} cursor-pointer" 
+                data-type="${type}"
+                data-pregunta="${preguntaId}"
+                data-index="${index}"
+                ${requiredAttr}>
+          <option value="">${config.placeholder}</option>
+          ${config.options.map(opt => `<option value="${opt}">${opt}</option>`).join('')}
+        </select>
+      `;
+
+      case 'textarea':
+        return `
+        <textarea class="${baseClass} resize-none" 
+                  rows="3"
+                  data-type="${type}"
+                  data-pregunta="${preguntaId}"
+                  data-index="${index}"
+                  placeholder="${config.placeholder}"
+                  ${requiredAttr}></textarea>
+      `;
+
+      case 'number':
+        return `
+        <input type="number" 
+               class="${baseClass}"
+               data-type="${type}"
+               data-pregunta="${preguntaId}"
+               data-index="${index}"
+               placeholder="${config.placeholder}"
+               min="${config.min || 0}"
+               step="${config.step || 1}"
+               ${requiredAttr}>
+      `;
+
+      case 'date':
+        return `
+        <input type="date" 
+               class="${baseClass}"
+               data-type="${type}"
+               data-pregunta="${preguntaId}"
+               data-index="${index}"
+               placeholder="${config.placeholder}"
+               ${requiredAttr}>
+      `;
+
+      default: // text
+        return `
+        <input type="text" 
+               class="${baseClass}"
+               data-type="${type}"
+               data-pregunta="${preguntaId}"
+               data-index="${index}"
+               placeholder="${config.placeholder}"
+               ${requiredAttr}>
+      `;
+    }
+  }
+
+
+  function generarFilaTabla(columns, preguntaId, rowIndex) {
+    return `
+    <tr class="table-row hover:bg-gray-50 transition-colors" data-row-index="${rowIndex}">
+      ${columns.map((col, colIndex) => {
+      const inputId = `cell_${preguntaId}_${rowIndex}_${colIndex}`;
+
+      switch (col.type) {
+        case 'select':
+          return `
+              <td class="px-4 py-2 border-b">
+                <select class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-secondary focus:ring-2 focus:ring-secondary focus:ring-opacity-20 transition-all"
+                        data-pregunta="${preguntaId}"
+                        data-row="${rowIndex}"
+                        data-col="${colIndex}"
+                        data-col-name="${col.name}"
+                        ${col.required ? 'required' : ''}>
+                  <option value="">${col.placeholder || 'Selecciona...'}</option>
+                  ${col.options.map(opt => `<option value="${opt}">${opt}</option>`).join('')}
+                </select>
+              </td>
+            `;
+
+        case 'number':
+          return `
+              <td class="px-4 py-2 border-b">
+                <input type="number" 
+                       class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-secondary focus:ring-2 focus:ring-secondary focus:ring-opacity-20 transition-all"
+                       placeholder="${col.placeholder || 'Ingresa un valor...'}"
+                       data-pregunta="${preguntaId}"
+                       data-row="${rowIndex}"
+                       data-col="${colIndex}"
+                       data-col-name="${col.name}"
+                       ${col.min ? `min="${col.min}"` : ''}
+                       ${col.max ? `max="${col.max}"` : ''}
+                       ${col.step ? `step="${col.step}"` : ''}
+                       ${col.required ? 'required' : ''}>
+              </td>
+            `;
+
+        case 'textarea':
+          return `
+              <td class="px-4 py-2 border-b">
+                <textarea rows="3"
+                          class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-secondary focus:ring-2 focus:ring-secondary focus:ring-opacity-20 transition-all resize-none"
+                          placeholder="${col.placeholder || 'Describe...'}"
+                          data-pregunta="${preguntaId}"
+                          data-row="${rowIndex}"
+                          data-col="${colIndex}"
+                          data-col-name="${col.name}"
+                          ${col.required ? 'required' : ''}></textarea>
+              </td>
+            `;
+
+        default: // text
+          return `
+              <td class="px-4 py-2 border-b">
+                <input type="text" 
+                       class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-secondary focus:ring-2 focus:ring-secondary focus:ring-opacity-20 transition-all"
+                       placeholder="${col.placeholder || 'Ingresa información...'}"
+                       data-pregunta="${preguntaId}"
+                       data-row="${rowIndex}"
+                       data-col="${colIndex}"
+                       data-col-name="${col.name}"
+                       ${col.required ? 'required' : ''}>
+              </td>
+            `;
+      }
+    }).join('')}
+      <td class="px-4 py-2 border-b text-center">
+        <button type="button" 
+                onclick="removeTableRow(this, ${preguntaId})"
+                class="text-red-500 hover:text-red-700 transition-colors">
+          <i class="fas fa-times-circle text-lg"></i>
+        </button>
+      </td>
+    </tr>
+  `;
+  }
+
+
+</script>
