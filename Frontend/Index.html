@@ -30,7 +30,7 @@
   <!-- Toast Container -->
   <div id="toastContainer" class="fixed bottom-4 right-4 z-50 space-y-2"></div>
   
-  <div class="container mx-auto px-4 py-8 max-w-4xl">
+  <div class="container mx-auto px-4 py-8 max-w-7xl">
     <!-- Card Principal -->
     <div class="bg-white rounded-2xl shadow-2xl overflow-hidden animate-slide-up card-hover">
       <!-- Header con gradiente personalizado -->
@@ -56,28 +56,24 @@
         </div>
       </div>
       
-      <!-- Form Content -->
-      <div class="p-8">
-        <!-- Indicador de pregunta actual -->
-        <div class="mb-6 flex items-center justify-between text-sm">
+      <div class="p-8 md:p-10 lg:p-12">  
+        <div class="mb-8 flex items-center justify-between text-base"> 
           <div class="flex items-center space-x-2 text-primary">
-            <i class="fas fa-question-circle text-accent"></i>
-            <span id="preguntaContador" class="font-medium">Pregunta 1 de 0</span>
+            <i class="fas fa-question-circle text-accent text-xl"></i> 
+            <span id="preguntaContador" class="font-medium text-lg">Pregunta 1 de 0</span>  
           </div>
         </div>
         
-        <!-- Contenedor de preguntas dinámicas -->
-        <div id="questionsContainer" class="min-h-[400px]">
+        <div id="questionsContainer" class="min-h-[500px]">  
           <!-- Aquí se cargarán las preguntas dinámicamente -->
         </div>
         
-        <!-- Botones de navegación -->
-        <div class="flex gap-3 mt-8 pt-6 border-t border-gray-200">
-          <button id="btnAnterior" class="hidden flex-1 px-6 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl font-semibold transition-all duration-300 transform hover:scale-105 focus:ring-4 focus:ring-secondary focus:ring-opacity-50 btn-custom">
-            <i class="fas fa-arrow-left mr-2"></i> Anterior
+        <div class="flex gap-4 mt-10 pt-6 border-t border-gray-200">  
+          <button id="btnAnterior" class="hidden flex-1 px-8 py-4 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl font-semibold transition-all duration-300 transform hover:scale-105 focus:ring-4 focus:ring-secondary focus:ring-opacity-50 btn-custom text-lg">
+            <i class="fas fa-arrow-left mr-3"></i> Anterior
           </button>
-          <button id="btnSiguiente" class="flex-1 px-6 py-3 bg-gradient-secondary text-white rounded-xl font-semibold transition-all duration-300 transform hover:scale-105 shadow-lg hover:shadow-xl focus:ring-4 focus:ring-secondary focus:ring-opacity-50 btn-custom">
-            Siguiente <i class="fas fa-arrow-right ml-2"></i>
+          <button id="btnSiguiente" class="flex-1 px-8 py-4 bg-secondary hover:bg-secondary-dark text-white rounded-xl font-semibold transition-all duration-300 transform hover:scale-105 shadow-lg hover:shadow-xl focus:ring-4 focus:ring-secondary focus:ring-opacity-50 btn-custom text-lg">
+            Siguiente <i class="fas fa-arrow-right ml-3"></i>
           </button>
         </div>
       </div>
