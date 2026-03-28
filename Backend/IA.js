@@ -1,6 +1,7 @@
 
 function optimizarRespuestasConIA(respuestasUsuario) {
-  const apiKey = env_().GEMINI_API_KEY;
+  const apiKey = PropertiesService.getScriptProperties().getProperty('API_KEY');
+
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${apiKey}`;
 
   const prompt = `Actúa como consultor experto. Optimiza estas respuestas para un plan estratégico: ${JSON.stringify(respuestasUsuario)}. 
