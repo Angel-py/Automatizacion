@@ -63,3 +63,21 @@ function include(filename) {
     console.log(error);
   }
 }
+
+function procesarFormulario(datosDelForm) {
+  try {
+    // Esto nos dirá en el log si el formulario envió algo
+    console.log("DATOS RECIBIDOS DEL FORM:", JSON.stringify(datosDelForm));
+
+    // 1. Obtenemos la IA
+    const respuestasIA = optimizarRespuestasConIA(datosDelForm);
+
+    // 2. Guardamos AMBOS
+    guardarEnSheets(datosDelForm, respuestasIA);
+
+    return { success: true, mensaje: "Procesado correctamente" };
+  } catch (e) {
+    console.error("Error en procesarFormulario: " + e.message);
+    return { success: false, error: e.message };
+  }
+}

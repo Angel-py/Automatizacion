@@ -2547,4 +2547,31 @@
     }
   }
 
+  // Dentro de Frontend/Js.html
+function finalizarYEnviar() {
+  const respuestasParaEnviar = {};
+  
+  // IMPORTANTE: Asegúrate de que tus respuestas se guarden con el ID como llave
+  // Ejemplo de cómo debería quedar el objeto: { "1": "Respuesta...", "2": "Respuesta..." }
+  preguntas.forEach((p, index) => {
+    // Aquí 'respuestas' es tu variable global donde guardas lo que escribe el usuario
+    respuestasParaEnviar[p.id] = respuestas[index]; 
+  });
+
+  // Mostrar loading
+  document.getElementById('loadingOverlay').classList.remove('hidden');
+
+  // ENVIAR AL SERVIDOR (Código.gs)
+  google.script.run
+    .withSuccessHandler(function(response) {
+      document.getElementById('loadingOverlay').classList.add('hidden');
+      alert("¡Plan generado con éxito!");
+    })
+    .withFailureHandler(function(err) {
+      document.getElementById('loadingOverlay').classList.add('hidden');
+      alert("Error: " + err.message);
+    })
+    .procesarFormulario(respuestasParaEnviar); // <--- Llamada a la función que creamos en Código.gs
+}
+
 </script>
