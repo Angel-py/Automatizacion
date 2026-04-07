@@ -1,13 +1,15 @@
-<!-- Scripts -->
 <script src="https://cdn.jsdelivr.net/npm/flowbite@2.5.2/dist/flowbite.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-
 <script>
+  // ==================== VARIABLES GLOBALES ====================
   let preguntas = [];
   let respuestas = {};
   let indiceActual = 0;
   let isSubmitting = false;
+  window.tagsData = {};
+  window.matrixSelections = {};
 
+  // ==================== INICIALIZACIÓN ====================
   google.script.run.withSuccessHandler(inicializarFormulario).obtenerPreguntas();
 
   function inicializarFormulario(preguntasData) {
@@ -18,1074 +20,47 @@
     document.getElementById('btnSiguiente').addEventListener('click', siguientePregunta);
     document.getElementById('btnAnterior').addEventListener('click', anteriorPregunta);
 
+    // cargarBorradorLocal();
+    //  window.addEventListener('beforeunload', () => guardarBorradorLocal());
+
     document.addEventListener('keypress', function (e) {
-      if (e.key === 'Enter' && !isSubmitting) {
-        const activeElement = document.activeElement;
-        if (activeElement.tagName !== 'TEXTAREA') {
-          e.preventDefault();
-          siguientePregunta();
-        }
+      if (e.key === 'Enter' && !isSubmitting && document.activeElement.tagName !== 'TEXTAREA') {
+        e.preventDefault();
+        siguientePregunta();
       }
     });
   }
 
+  // ==================== NAVEGACIÓN ====================
   function mostrarPreguntaActual() {
-    try {
-      const container = document.getElementById('questionsContainer');
-      const pregunta = preguntas[indiceActual];
+    const container = document.getElementById('questionsContainer');
+    const pregunta = preguntas[indiceActual];
+    if (!pregunta) return;
 
-      if (!pregunta) return;
-
-      // Animación de entrada
-      container.style.opacity = '0';
-      container.style.transform = 'translateX(20px)';
-
+    container.style.opacity = '0';
+    container.style.transform = 'translateX(20px)';
+    setTimeout(() => {
+      container.innerHTML = generarHTMLPregunta(pregunta);
+      restaurarValoresPregunta(pregunta);
       setTimeout(() => {
-        container.innerHTML = generarHTMLPregunta(pregunta);
-
-        // ✅ RESTAURAR VALORES DESPUÉS DE GENERAR EL HTML
-        restaurarValoresPregunta(pregunta);
-
-        // Enfocar automáticamente el campo
-        setTimeout(() => {
-          const primerCampo = document.querySelector('#questionsContainer input:not([type="hidden"]), #questionsContainer textarea, #questionsContainer select');
-          if (primerCampo && !primerCampo.value) {
-            primerCampo.focus();
-          }
-        }, 100);
-
-        // Animación de entrada
-        container.style.transition = 'all 0.3s ease';
-        container.style.opacity = '1';
-        container.style.transform = 'translateX(0)';
-      }, 150);
-
-      // Actualizar botones
-      document.getElementById('btnAnterior').classList.toggle('hidden', indiceActual === 0);
-
-      const btnSiguiente = document.getElementById('btnSiguiente');
-      const isLast = indiceActual === preguntas.length - 1;
-      btnSiguiente.innerHTML = isLast ?
-        '<i class="fas fa-check-circle mr-2"></i> Finalizar y Optimizar' :
-        'Siguiente <i class="fas fa-arrow-right ml-2"></i>';
-
-      actualizarContador();
-    } catch (error) {
-      console.log(error)
-    }
-  }
-
-
-  function restaurarValoresPregunta(pregunta) {
-    if (!respuestas[pregunta.id]) return;
-
-    const respuestaGuardada = respuestas[pregunta.id];
-
-    switch (pregunta.tipo) {
-      case 'dynamic-keyvalue':
-        restaurarKeyValue(pregunta.id, respuestaGuardada);
-        break;
-
-      case 'dynamic-table':
-        restaurarTabla(pregunta.id, respuestaGuardada);
-        break;
-
-      case 'dynamic-list':
-        restaurarLista(pregunta.id, respuestaGuardada);
-        break;
-
-      case 'dynamic-tags':
-        restaurarTags(pregunta.id, respuestaGuardada);
-        break;
-
-      case 'matrix-checkbox':
-        restaurarMatriz(pregunta.id, respuestaGuardada);
-        break;
-
-      default:
-        // Para campos simples
-        const campo = document.querySelector(`#respuesta_${pregunta.id}`);
-        if (campo && respuestaGuardada) {
-          campo.value = respuestaGuardada;
-        }
-        break;
-    }
-  }
-
-  function restaurarKeyValue(preguntaId, respuestaGuardada) {
-    try {
-      const kvData = typeof respuestaGuardada === 'string' ? JSON.parse(respuestaGuardada) : respuestaGuardada;
-      const container = document.getElementById(`dynamic-kv-${preguntaId}`);
-      if (!container || !kvData) return;
-
-      const keyConfig = preguntas.find(p => p.id === preguntaId)?.keyConfig || { type: 'text' };
-      const valueConfig = preguntas.find(p => p.id === preguntaId)?.valueConfig || { type: 'text' };
-
-      // Limpiar items existentes excepto el primero
-      const items = container.querySelectorAll('.kv-item');
-      for (let i = items.length - 1; i > 0; i--) {
-        items[i].remove();
-      }
-
-      // Obtener el primer item y establecer valores
-      const primerItem = items[0];
-      if (primerItem) {
-        const keys = Object.keys(kvData);
-        if (keys.length > 0) {
-          const primerKey = keys[0];
-          const primerValor = kvData[primerKey];
-
-          const keyInput = primerItem.querySelector('[data-type="key"]');
-          const valueInput = primerItem.querySelector('[data-type="value"]');
-
-          if (keyInput) keyInput.value = primerKey;
-          if (valueInput) valueInput.value = primerValor;
-
-          // Agregar items adicionales
-          for (let i = 1; i < keys.length; i++) {
-            const key = keys[i];
-            const value = kvData[key];
-
-            const newItem = document.createElement('div');
-            newItem.className = 'kv-item flex gap-2 items-start mt-2';
-            newItem.innerHTML = `
-            ${generarInputKeyValue(keyConfig, 'key', preguntaId, i)}
-            ${generarInputKeyValue(valueConfig, 'value', preguntaId, i)}
-            <button type="button" 
-                    onclick="removeKVItem(this, ${preguntaId})"
-                    class="px-4 py-3 bg-red-100 hover:bg-red-200 text-red-600 rounded-xl transition-all duration-300">
-              <i class="fas fa-trash-alt"></i>
-            </button>
-          `;
-
-            const buttonContainer = container.querySelector('.flex.justify-between');
-            container.insertBefore(newItem, buttonContainer);
-
-            const newKeyInput = newItem.querySelector('[data-type="key"]');
-            const newValueInput = newItem.querySelector('[data-type="value"]');
-
-            if (newKeyInput) newKeyInput.value = key;
-            if (newValueInput) newValueInput.value = value;
-          }
-        }
-      }
-
-      // Actualizar contador y hidden field
-      updateKVCounter(preguntaId);
-      updateHiddenField(preguntaId);
-
-    } catch (e) {
-      console.error('Error restaurando KeyValue:', e);
-    }
-  }
-
-  function restaurarTabla(preguntaId, respuestaGuardada) {
-    try {
-      // Parsear los datos guardados
-      let tableData;
-      if (typeof respuestaGuardada === 'string') {
-        tableData = JSON.parse(respuestaGuardada);
-      } else {
-        tableData = respuestaGuardada;
-      }
-
-      const tbody = document.getElementById(`table-body-${preguntaId}`);
-      if (!tbody) return;
-
-      const pregunta = preguntas.find(p => p.id === preguntaId);
-      const columns = pregunta?.columns || [];
-
-      if (!tableData || !Array.isArray(tableData) || tableData.length === 0) {
-        // Si no hay datos, asegurar al menos una fila vacía
-        const currentRows = tbody.querySelectorAll('.table-row').length;
-        if (currentRows === 0) {
-          agregarFilaTablaVacia(preguntaId, tbody, columns);
-        }
-        return;
-      }
-
-      // Limpiar todas las filas existentes
-      tbody.innerHTML = '';
-
-      // Crear filas según los datos guardados
-      tableData.forEach((rowData, rowIndex) => {
-        const newRow = crearFilaTabla(columns, preguntaId, rowIndex, rowData);
-        tbody.appendChild(newRow);
-      });
-
-      // Actualizar contador y hidden field
-      updateTableCounter(preguntaId);
-      updateTableHiddenField(preguntaId);
-
-    } catch (e) {
-      console.error('Error restaurando Tabla:', e);
-      // En caso de error, crear una fila vacía
-      const tbody = document.getElementById(`table-body-${preguntaId}`);
-      const pregunta = preguntas.find(p => p.id === preguntaId);
-      const columns = pregunta?.columns || [];
-      if (tbody && tbody.children.length === 0) {
-        agregarFilaTablaVacia(preguntaId, tbody, columns);
-      }
-    }
-  }
-
-  function crearFilaTabla(columns, preguntaId, rowIndex, rowData = {}) {
-    const row = document.createElement('tr');
-    row.className = 'table-row hover:bg-gray-50 transition-colors';
-    row.setAttribute('data-row-index', rowIndex);
-
-    let cellsHtml = '';
-
-    columns.forEach((col, colIndex) => {
-      const value = rowData[col.name] || '';
-      const inputId = `cell_${preguntaId}_${rowIndex}_${colIndex}`;
-
-      switch (col.type) {
-        case 'select':
-          cellsHtml += `
-          <td class="px-4 py-2 border-b">
-            <select class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-secondary focus:ring-2 focus:ring-secondary focus:ring-opacity-20 transition-all"
-                    data-pregunta="${preguntaId}"
-                    data-row="${rowIndex}"
-                    data-col="${colIndex}"
-                    data-col-name="${col.name}"
-                    ${col.required ? 'required' : ''}
-                    onchange="updateTableHiddenField(${preguntaId})">
-              <option value="">${col.placeholder || 'Selecciona...'}</option>
-              ${col.options.map(opt => `<option value="${opt}" ${value === opt ? 'selected' : ''}>${opt}</option>`).join('')}
-            </select>
-           </td>
-        `;
-          break;
-
-        case 'textarea':
-          cellsHtml += `
-          <td class="px-4 py-2 border-b">
-            <textarea rows="3"
-                      class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-secondary focus:ring-2 focus:ring-secondary focus:ring-opacity-20 transition-all resize-none"
-                      placeholder="${col.placeholder || 'Describe...'}"
-                      data-pregunta="${preguntaId}"
-                      data-row="${rowIndex}"
-                      data-col="${colIndex}"
-                      data-col-name="${col.name}"
-                      ${col.required ? 'required' : ''}
-                      oninput="updateTableHiddenField(${preguntaId})">${escapeHtml(value)}</textarea>
-           </td>
-        `;
-          break;
-
-        case 'number':
-          cellsHtml += `
-          <td class="px-4 py-2 border-b">
-            <input type="number" 
-                   class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-secondary focus:ring-2 focus:ring-secondary focus:ring-opacity-20 transition-all"
-                   placeholder="${col.placeholder || 'Ingresa un valor...'}"
-                   value="${escapeHtml(value)}"
-                   data-pregunta="${preguntaId}"
-                   data-row="${rowIndex}"
-                   data-col="${colIndex}"
-                   data-col-name="${col.name}"
-                   ${col.min ? `min="${col.min}"` : ''}
-                   ${col.max ? `max="${col.max}"` : ''}
-                   ${col.step ? `step="${col.step}"` : ''}
-                   ${col.required ? 'required' : ''}
-                   oninput="updateTableHiddenField(${preguntaId})">
-           </td>
-        `;
-          break;
-
-        default: // text
-          cellsHtml += `
-          <td class="px-4 py-2 border-b">
-            <input type="text" 
-                   class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-secondary focus:ring-2 focus:ring-secondary focus:ring-opacity-20 transition-all"
-                   placeholder="${col.placeholder || 'Ingresa información...'}"
-                   value="${escapeHtml(value)}"
-                   data-pregunta="${preguntaId}"
-                   data-row="${rowIndex}"
-                   data-col="${colIndex}"
-                   data-col-name="${col.name}"
-                   ${col.required ? 'required' : ''}
-                   oninput="updateTableHiddenField(${preguntaId})">
-           </td>
-        `;
-          break;
-      }
-    });
-
-    cellsHtml += `
-    <td class="px-4 py-2 border-b text-center">
-      <button type="button" 
-              onclick="removeTableRow(this, ${preguntaId})"
-              class="text-red-500 hover:text-red-700 transition-colors">
-        <i class="fas fa-times-circle text-lg"></i>
-      </button>
-    </td>
-  `;
-
-    row.innerHTML = cellsHtml;
-    return row;
-  }
-
-  function agregarFilaTablaVacia(preguntaId, tbody, columns) {
-    const emptyRowData = {};
-    columns.forEach(col => {
-      emptyRowData[col.name] = '';
-    });
-    const newRow = crearFilaTabla(columns, preguntaId, 0, emptyRowData);
-    tbody.appendChild(newRow);
-    updateTableCounter(preguntaId);
-    updateTableHiddenField(preguntaId);
-  }
-
-
-  function restaurarLista(preguntaId, respuestaGuardada) {
-    try {
-      const listData = typeof respuestaGuardada === 'string' ? JSON.parse(respuestaGuardada) : respuestaGuardada;
-      const container = document.getElementById(`dynamic-list-${preguntaId}`);
-      if (!container || !listData || !Array.isArray(listData)) return;
-
-      // Limpiar items existentes excepto el primero
-      const items = container.querySelectorAll('.dynamic-item');
-      for (let i = items.length - 1; i > 0; i--) {
-        items[i].remove();
-      }
-
-      // Restaurar primer item
-      const primerItem = items[0];
-      if (primerItem && listData[0]) {
-        const input = primerItem.querySelector('input');
-        if (input) input.value = listData[0];
-      }
-
-      // Agregar items adicionales
-      for (let i = 1; i < listData.length; i++) {
-        const newItem = document.createElement('div');
-        newItem.className = 'dynamic-item flex gap-2 mt-2';
-        newItem.innerHTML = `
-        <input type="text" 
-               class="flex-1 px-4 py-3 border-2 border-gray-300 rounded-xl focus:border-secondary focus:ring-4 focus:ring-secondary focus:ring-opacity-20 transition-all duration-300"
-               placeholder="${preguntas.find(p => p.id === preguntaId)?.itemPlaceholder || 'Ingresa un item...'}"
-               value="${escapeHtml(listData[i])}">
-        <button type="button" 
-                onclick="removeDynamicItem(this)"
-                class="px-4 py-3 bg-red-100 hover:bg-red-200 text-red-600 rounded-xl transition-all duration-300">
-          <i class="fas fa-trash-alt"></i>
-        </button>
-      `;
-
-        const addButton = container.querySelector('button[onclick*="addDynamicItem"]');
-        container.insertBefore(newItem, addButton);
-      }
-
-      updateListCounter(preguntaId);
-      updateHiddenField(preguntaId);
-
-    } catch (e) {
-      console.error('Error restaurando Lista:', e);
-    }
-  }
-
-  function restaurarTags(preguntaId, respuestaGuardada) {
-    try {
-      const tagsData = typeof respuestaGuardada === 'string' ? JSON.parse(respuestaGuardada) : respuestaGuardada;
-      if (!tagsData || !Array.isArray(tagsData)) return;
-
-      // Limpiar tags existentes
-      const container = document.getElementById(`tags-container-${preguntaId}`);
-      if (container) {
-        container.innerHTML = '';
-        window.tagsData = window.tagsData || {};
-        window.tagsData[preguntaId] = tagsData;
-
-        tagsData.forEach(tag => {
-          const tagElement = document.createElement('span');
-          tagElement.className = 'inline-flex items-center gap-2 px-3 py-1.5 bg-secondary bg-opacity-10 text-secondary rounded-full text-sm font-medium';
-          tagElement.innerHTML = `
-          ${escapeHtml(tag)}
-          <button type="button" 
-                  onclick="removeTag(${preguntaId}, '${escapeHtml(tag)}')"
-                  class="hover:text-red-600 transition-colors">
-            <i class="fas fa-times-circle text-xs"></i>
-          </button>
-        `;
-          container.appendChild(tagElement);
-        });
-      }
-
-      updateHiddenField(preguntaId);
-
-    } catch (e) {
-      console.error('Error restaurando Tags:', e);
-    }
-  }
-
-  function updateListCounter(preguntaId) {
-    const container = document.getElementById(`dynamic-list-${preguntaId}`);
-    if (!container) return;
-
-    const currentItems = container.querySelectorAll('.dynamic-item').length;
-    const max = parseInt(container.dataset.max) || 20;
-    const counter = document.getElementById(`list-counter-${preguntaId}`);
-
-    if (counter) {
-      counter.textContent = `${currentItems} / ${max}`;
-    }
-
-    const addButton = document.getElementById(`btn-add-list-${preguntaId}`);
-    if (addButton) {
-      addButton.disabled = currentItems >= max;
-      if (currentItems >= max) {
-        addButton.classList.add('opacity-50', 'cursor-not-allowed');
-      } else {
-        addButton.classList.remove('opacity-50', 'cursor-not-allowed');
-      }
-    }
-  }
-
-  // Función auxiliar para escapar HTML
-  function escapeHtml(text) {
-    if (!text) return '';
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-  }
-
-
-  function getIconForType(tipo) {
-    const icons = {
-      'textarea': 'fa-align-left',
-      'select': 'fa-chevron-down',
-      'number': 'fa-hashtag',
-      'text': 'fa-pencil-alt',
-      'dynamic-list': 'fa-list-ul',
-      'dynamic-table': 'fa-table',
-      'dynamic-keyvalue': 'fa-code-branch',
-      'dynamic-tags': 'fa-tags',
-      'foda-opportunities-threats': 'fa-chart-line'
-    };
-    return icons[tipo] || 'fa-question-circle';
-  }
-
-  function generarHTMLPregunta(pregunta) {
-    try {
-      let campoHTML = '';
-      const fieldId = `respuesta_${pregunta.id}`;
-
-      switch (pregunta.tipo) {
-        case 'textarea': {
-          campoHTML = `
-          <textarea id="${fieldId}" 
-                    rows="5"
-                    class="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:border-accent focus:ring-4 focus:ring-accent focus:ring-opacity-20 transition-all duration-300 resize-none"
-                    placeholder="Escribe tu respuesta detallada aquí..."></textarea>
-          <div class="mt-2 text-xs text-gray-500 flex items-center">
-            <i class="fas fa-info-circle mr-1 text-accent"></i> Sugerencia: Sé específico y detallado
-          </div>
-        `;
-          break;
-        }
-
-        case 'dynamic-list': {
-          campoHTML = `
-          <div id="dynamic-list-${pregunta.id}" class="space-y-3">
-            <div class="dynamic-item flex gap-2">
-              <input type="text" 
-                    class="flex-1 px-4 py-3 border-2 border-gray-300 rounded-xl focus:border-secondary focus:ring-4 focus:ring-secondary focus:ring-opacity-20 transition-all duration-300"
-                    placeholder="${pregunta.itemPlaceholder || 'Ingresa un item...'}">
-              <button type="button" 
-                      onclick="removeDynamicItem(this)"
-                      class="px-4 py-3 bg-red-100 hover:bg-red-200 text-red-600 rounded-xl transition-all duration-300">
-                <i class="fas fa-trash-alt"></i>
-              </button>
-            </div>
-            <button type="button" 
-                    onclick="addDynamicItem(${pregunta.id})"
-                    class="mt-2 px-4 py-2 bg-secondary bg-opacity-10 hover:bg-opacity-20 text-secondary rounded-lg transition-all duration-300 text-sm font-semibold">
-              <i class="fas fa-plus-circle mr-2"></i>Agregar ${pregunta.itemLabel || 'item'}
-            </button>
-            <div class="mt-2 text-xs text-gray-500 flex items-center">
-              <i class="fas fa-layer-group mr-1 text-accent"></i> Puedes agregar múltiples elementos
-            </div>
-          </div>
-          <input type="hidden" id="${fieldId}" name="${fieldId}">
-        `;
-          break;
-        }
-
-        case 'dynamic-table': {
-          const columns = pregunta.columns || [];
-          const kvLimits = pregunta.limits || { min: 1, max: 20 };
-          const rows = pregunta.rows || 1;
-          const rowLabels = pregunta.rowLabels || [];
-          const isBusinessCanvas = rows === 2 && columns.length === 5;
-          const preguntaId = pregunta.id;
-
-          if (isBusinessCanvas) {
-            campoHTML = generarHTMLBusinessCanvas(pregunta, fieldId, columns, kvLimits, rows, rowLabels);
-          } else {
-            const primeraFilaHTML = generarFilaTabla(columns, preguntaId, 0);
-
-            campoHTML = `
-              <div class="dynamic-table-wrapper" data-pregunta-id="${preguntaId}">
-                <div class="dynamic-table-scroll-indicator hidden md:flex items-center justify-center gap-2 mb-2 text-xs text-gray-500">
-                  <i class="fas fa-arrows-alt-h"></i>
-                  <span>Desliza horizontalmente para ver más contenido</span>
-                  <i class="fas fa-arrow-right"></i>
-                </div>
-                
-                <div class="dynamic-table-container overflow-x-auto rounded-xl border border-gray-200 shadow-sm" 
-                    id="dynamic-table-${preguntaId}">
-                  <table class="min-w-full bg-white" style="min-width: ${Math.max(500, columns.length * 180)}px;">
-                    <thead class="bg-gray-50 sticky top-0">
-                      <tr>
-                        ${columns.map(col => `
-                          <th class="px-4 py-3 text-left text-sm font-semibold text-gray-700 border-b" style="min-width: 180px;">
-                            <div class="flex items-center space-x-1">
-                              <span>${col.name}</span>
-                              ${col.required ? '<span class="text-red-500 text-xs">*</span>' : ''}
-                              ${col.help ? `
-                                <div class="group relative inline-block">
-                                  <i class="fas fa-question-circle text-gray-400 text-xs cursor-help"></i>
-                                  <div class="hidden group-hover:block absolute z-10 w-64 p-2 mt-1 text-xs text-white bg-gray-800 rounded-lg shadow-lg -left-32">
-                                    ${col.help}
-                                  </div>
-                                </div>
-                              ` : ''}
-                            </div>
-                          </th>
-                        `).join('')}
-                        <th class="px-4 py-3 text-left text-sm font-semibold text-gray-700 border-b w-12 sticky right-0 bg-gray-50 shadow-[-2px_0_5px_-2px_rgba(0,0,0,0.1)]" style="min-width: 60px;">
-                          <i class="fas fa-trash-alt text-red-500"></i>
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody id="table-body-${preguntaId}">
-                      ${primeraFilaHTML}
-                    </tbody>
-                  </table>
-                </div>
-                
-                <div class="flex flex-col sm:flex-row justify-between items-center gap-3 mt-4">
-                  <button type="button" 
-                          onclick="addTableRow(${preguntaId})"
-                          id="btn-add-table-${preguntaId}"
-                          class="w-full sm:w-auto px-4 py-2 bg-secondary bg-opacity-10 hover:bg-opacity-20 text-secondary rounded-lg transition-all duration-300 text-sm font-semibold flex items-center justify-center gap-2">
-                    <i class="fas fa-plus-circle"></i>
-                    <span>Agregar fila</span>
-                  </button>
-                  <span id="table-counter-${preguntaId}" class="text-xs text-gray-500">
-                    1 / ${kvLimits.max} filas
-                  </span>
-                </div>
-                
-                <div class="mt-2 text-xs text-gray-500 flex items-center justify-center gap-2 flex-wrap">
-                  <i class="fas fa-chart-line mr-1 text-accent"></i> 
-                  <span>Mínimo: ${kvLimits.min} ${kvLimits.min === 1 ? 'fila' : 'filas'}</span>
-                  <span>•</span>
-                  <span>Máximo: ${kvLimits.max} filas</span>
-                  <span>•</span>
-                  <span class="hidden sm:inline">Desliza horizontalmente si es necesario</span>
-                </div>
-              </div>
-              <input type="hidden" id="${fieldId}" name="${fieldId}">
-            `;
-          }
-          break;
-        }
-
-
-        case 'dynamic-keyvalue': {
-          const keyConfig = pregunta.keyConfig || {
-            type: "text",
-            placeholder: "Clave",
-            required: true
-          };
-
-          const valueConfig = pregunta.valueConfig || {
-            type: "text",
-            placeholder: "Valor",
-            required: true
-          };
-
-          const limits = pregunta.limits || {
-            min: 1,
-            max: 20
-          };
-
-          campoHTML = `
-          <div id="dynamic-kv-${pregunta.id}" 
-              class="space-y-3" 
-              data-min="${limits.min}" 
-              data-max="${limits.max}"
-              data-pregunta-id="${pregunta.id}">
-            <div class="kv-item flex gap-2 items-start">
-              ${generarInputKeyValue(keyConfig, 'key', pregunta.id, 0)}
-              ${generarInputKeyValue(valueConfig, 'value', pregunta.id, 0)}
-              <button type="button" 
-                      onclick="removeKVItem(this, ${pregunta.id})"
-                      class="px-4 py-3 bg-red-100 hover:bg-red-200 text-red-600 rounded-xl transition-all duration-300">
-                <i class="fas fa-trash-alt"></i>
-              </button>
-            </div>
-            <div class="flex justify-between items-center">
-              <button type="button" 
-                      onclick="addKVItem(${pregunta.id})"
-                      id="btn-add-kv-${pregunta.id}"
-                      class="px-4 py-2 bg-secondary bg-opacity-10 hover:bg-opacity-20 text-secondary rounded-lg transition-all duration-300 text-sm font-semibold">
-                <i class="fas fa-plus-circle mr-2"></i>Agregar par
-              </button>
-              <span id="kv-counter-${pregunta.id}" class="text-xs text-gray-500">
-                1 / ${limits.max}
-              </span>
-            </div>
-            <div class="mt-2 text-xs text-gray-500 flex items-center">
-              <i class="fas fa-info-circle mr-1 text-accent"></i> 
-              Mínimo: ${limits.min} par(es) | Máximo: ${limits.max} par(es)
-            </div>
-          </div>
-          <input type="hidden" id="${fieldId}" name="${fieldId}">
-        `;
-          break;
-        }
-
-        case 'dynamic-tags': {
-          campoHTML = `
-          <div id="dynamic-tags-${pregunta.id}" class="space-y-3">
-            <div class="tags-container flex flex-wrap gap-2 mb-3" id="tags-container-${pregunta.id}">
-              <!-- Tags se agregarán aquí dinámicamente -->
-            </div>
-            <div class="flex gap-2">
-              <input type="text" 
-                     id="tag-input-${pregunta.id}"
-                     class="flex-1 px-4 py-3 border-2 border-gray-300 rounded-xl focus:border-secondary focus:ring-4 focus:ring-secondary focus:ring-opacity-20 transition-all duration-300"
-                     placeholder="${pregunta.tagPlaceholder || 'Escribe una etiqueta y presiona Enter...'}"
-                     onkeypress="handleTagKeyPress(event, ${pregunta.id})">
-              <button type="button" 
-                      onclick="addTag(${pregunta.id})"
-                      class="px-6 py-3 bg-secondary hover:bg-secondary-dark text-white rounded-xl transition-all duration-300 font-semibold">
-                <i class="fas fa-plus"></i>
-              </button>
-            </div>
-            <div class="mt-2 text-xs text-gray-500 flex items-center">
-              <i class="fas fa-tags mr-1 text-accent"></i> Presiona Enter o haz clic en + para agregar
-            </div>
-          </div>
-          <input type="hidden" id="${fieldId}" name="${fieldId}">
-        `;
-          break;
-        }
-
-        case 'select': {
-          let options = '<option value="">Selecciona una opción...</option>';
-          pregunta.opciones.forEach(op => {
-            options += `<option value="${op}">${op}</option>`;
-          });
-          campoHTML = `
-          <select id="${fieldId}" 
-                  class="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:border-accent focus:ring-4 focus:ring-accent focus:ring-opacity-20 transition-all duration-300 cursor-pointer">
-            ${options}
-          </select>
-        `;
-          break;
-        }
-
-        case 'number': {
-          campoHTML = `
-          <input type="number" 
-                 id="${fieldId}"
-                 class="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:border-accent focus:ring-4 focus:ring-accent focus:ring-opacity-20 transition-all duration-300"
-                 placeholder="Ingresa un valor numérico...">
-        `;
-          break;
-        }
-
-        case 'matrix-checkbox': {
-          const matrixConfig = pregunta.matrixConfig;
-          const rows = matrixConfig?.rows || [];
-          const columns = matrixConfig?.columns || [];
-          const combinations = matrixConfig?.combinations || [];
-          const multipleSelection = pregunta.multipleSelection || false;
-
-          campoHTML = `
-          <div id="matrix-container-${pregunta.id}" class="space-y-4">
-            <div class="overflow-x-auto">
-              <table class="min-w-full bg-white border border-gray-200 rounded-xl shadow-lg">
-                <thead>
-                  <tr>
-                    <th class="px-4 py-3 bg-gray-50 border-b"></th>
-                    ${columns.map(col => `
-                      <th class="px-6 py-3 text-center bg-gray-50 border-b">
-                        <div class="flex flex-col items-center">
-                          <span class="text-lg font-bold ${col.color === 'secondary' ? 'text-secondary' : 'text-accent'}">${col.label}</span>
-                          <span class="text-xs text-gray-500">Impacto</span>
-                        </div>
-                      </th>
-                    `).join('')}
-                  </tr>
-                </thead>
-                <tbody>
-                  ${rows.map(row => `
-                    <tr class="hover:bg-gray-50 transition-colors">
-                      <td class="px-4 py-4 border-b font-bold text-center bg-gray-50">
-                        <div class="flex flex-col items-center">
-                          <span class="text-lg font-bold ${row.color === 'secondary' ? 'text-secondary' : 'text-accent'}">${row.label}</span>
-                          <span class="text-xs text-gray-500">Probabilidad</span>
-                        </div>
-                      </td>
-                      ${columns.map(col => {
-            const combination = combinations.find(c => c.row === row.value && c.col === col.value);
-            const comboLabel = combination ? combination.label : `${row.label}-${col.label}`;
-            const comboDescription = combination ? combination.description : '';
-            const comboColor = combination ? combination.color : 'bg-gray-100';
-
-            return `
-                          <td class="px-4 py-4 border-b text-center">
-                            <div class="flex flex-col items-center space-y-2">
-                              <label class="relative inline-flex items-center cursor-pointer">
-                                <input type="checkbox"
-                                       class="matrix-checkbox w-6 h-6 ${comboColor} border-2 border-gray-300 rounded-lg focus:ring-secondary focus:ring-2 transition-all cursor-pointer"
-                                       data-row="${row.value}"
-                                       data-col="${col.value}"
-                                       data-combo="${comboLabel}"
-                                       onchange="handleMatrixSelection(${pregunta.id}, this, '${multipleSelection}')">
-                                <span class="ml-2 text-sm font-medium text-gray-700">X</span>
-                              </label>
-                              ${comboDescription ? `
-                                <div class="text-xs text-gray-500 mt-1 max-w-[120px] text-center">
-                                  ${comboDescription}
-                                </div>
-                              ` : ''}
-                            </div>
-                          </td>
-                        `;
-          }).join('')}
-                    </tr>
-                  `).join('')}
-                </tbody>
-              </table>
-            </div>
-            
-            <div class="bg-gray-50 rounded-lg p-4 border border-gray-200">
-              <h4 class="text-sm font-semibold text-primary mb-2">
-                <i class="fas fa-info-circle mr-1 text-accent"></i>Interpretación de combinaciones:
-              </h4>
-              <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
-                ${combinations.map(combo => `
-                  <div class="flex items-center space-x-2 text-xs">
-                    <div class="w-3 h-3 ${combo.color} rounded"></div>
-                    <span class="font-medium">${combo.label}:</span>
-                    <span class="text-gray-600">${combo.description}</span>
-                  </div>
-                `).join('')}
-              </div>
-            </div>
-            
-            <div id="matrix-feedback-${pregunta.id}" class="text-sm text-center p-3 rounded-lg hidden">
-              <i class="fas fa-check-circle mr-1"></i>
-              <span></span>
-            </div>
-          </div>
-          <input type="hidden" id="${fieldId}" name="${fieldId}">
-        `;
-          break;
-        }
-
-        default: {
-          campoHTML = `
-          <input type="text" 
-                 id="${fieldId}"
-                 class="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:border-accent focus:ring-4 focus:ring-accent focus:ring-opacity-20 transition-all duration-300"
-                 placeholder="Escribe tu respuesta aquí...">
-        `;
-          break;
-        }
-      }
-
-      return `
-      <div class="animate-slide-up">
-        <div class="mb-4 flex items-start space-x-3">
-          <div class="flex-shrink-0 w-10 h-10 bg-secondary rounded-xl flex items-center justify-center text-white shadow-lg">
-            <i class="fas ${getIconForType(pregunta.tipo)} text-lg"></i>
-          </div>
-          <div class="flex-1" style="overflow-x:auto">
-            <label class="block text-xl font-bold text-primary mb-3">
-              ${pregunta.numero}. ${pregunta.texto}
-            </label>
-            ${campoHTML}
-          </div>
-        </div>
-        ${pregunta.ayuda ? `
-          <div class="ml-13 mt-3 p-3 bg-accent bg-opacity-5 rounded-lg border border-accent border-opacity-20">
-            <i class="fas fa-lightbulb text-accent mr-2"></i>
-            <span class="text-sm text-gray-700">${pregunta.ayuda}</span>
-          </div>
-        ` : ''}
-      </div>
-    `;
-    } catch (error) {
-      console.log(error)
-    }
-  }
-
-
-  function generarHTMLBusinessCanvas(pregunta, fieldId, columns, limits, rows, rowLabels) {
-    const preguntaId = pregunta.id;
-
-    return `
-    <div class="business-canvas-wrapper" data-pregunta-id="${preguntaId}">
-      <!-- Indicador de scroll para móvil -->
-      <div class="dynamic-table-scroll-indicator hidden md:flex items-center justify-center gap-2 mb-2 text-xs text-gray-500">
-        <i class="fas fa-arrows-alt-h"></i>
-        <span>Desliza horizontalmente para ver más contenido</span>
-        <i class="fas fa-arrow-right"></i>
-      </div>
-      
-      <!-- Contenedor con scroll horizontal -->
-      <div class="business-canvas-container overflow-x-auto rounded-xl border border-gray-200 shadow-sm" 
-           id="dynamic-table-${preguntaId}">
-        <div class="bg-gradient-to-r from-primary to-accent text-white p-3 rounded-t-lg">
-          <h3 class="text-center font-bold">BUSINESS MODEL CANVAS</h3>
-          <p class="text-center text-xs opacity-90">Lienzo de Modelo de Negocio</p>
-        </div>
-        
-        <table class="min-w-full bg-white" style="min-width: ${Math.max(800, columns.length * 200)}px;">
-          <thead class="bg-gradient-to-r from-gray-50 to-gray-100">
-            <tr class="border-b">
-              ${columns.map(col => `
-                <th class="px-3 py-3 text-center text-sm font-bold text-primary border-r border-gray-200 last:border-r-0" style="min-width: 180px;">
-                  <div class="flex flex-col items-center">
-                    <span>${col.name}</span>
-                    <span class="text-xs text-gray-500 font-normal mt-1">${col.placeholder || ''}</span>
-                    ${col.required ? '<span class="text-red-500 text-xs ml-1">*</span>' : ''}
-                  </div>
-                </th>
-              `).join('')}
-            </tr>
-          </thead>
-          <tbody id="table-body-${preguntaId}">
-            ${generarFilasBusinessCanvasResponsive(columns, preguntaId, rows, rowLabels)}
-          </tbody>
-        </table>
-      </div>
-      
-      <div class="flex flex-col sm:flex-row justify-between items-center gap-3 mt-4">
-        <button type="button" 
-                onclick="addBusinessCanvasRow(${preguntaId})"
-                id="btn-add-table-${preguntaId}"
-                class="w-full sm:w-auto px-4 py-2 bg-secondary bg-opacity-10 hover:bg-opacity-20 text-secondary rounded-lg transition-all duration-300 text-sm font-semibold flex items-center justify-center gap-2">
-          <i class="fas fa-plus-circle"></i>
-          <span>Agregar fila</span>
-        </button>
-        <span id="table-counter-${preguntaId}" class="text-xs text-gray-500">
-          1 / ${limits.max} filas
-        </span>
-      </div>
-      
-      <div class="mt-3 text-xs text-gray-500 flex items-center justify-center gap-4 flex-wrap">
-        <div class="flex items-center">
-          <div class="w-3 h-3 bg-secondary rounded-full mr-1"></div>
-          <span>Bloques estratégicos</span>
-        </div>
-        <div class="flex items-center">
-          <div class="w-3 h-3 bg-accent rounded-full mr-1"></div>
-          <span>Bloques operativos/financieros</span>
-        </div>
-        <div class="flex items-center">
-          <i class="fas fa-arrows-alt-h text-accent mr-1"></i>
-          <span>Desliza horizontalmente si es necesario</span>
-        </div>
-      </div>
-    </div>
-    <input type="hidden" id="${fieldId}" name="${fieldId}">
-  `;
-  }
-
-  function guardarRespuestaActual() {
-    const pregunta = preguntas[indiceActual];
-    if (!pregunta) return true;
-
-    try {
-      switch (pregunta.tipo) {
-        case 'dynamic-keyvalue':
-          updateHiddenField(pregunta.id);
-          const kvHiddenField = document.getElementById(`respuesta_${pregunta.id}`);
-          if (kvHiddenField && kvHiddenField.value) {
-            respuestas[pregunta.id] = kvHiddenField.value;
-          }
-          break;
-
-        case 'dynamic-table': {
-          const columns = pregunta.columns || [];
-          const kvLimits = pregunta.limits || { min: 1, max: 20 };
-          const rows = pregunta.rows || 1;
-          const rowLabels = pregunta.rowLabels || [];
-          const isBusinessCanvas = rows === 2 && columns.length === 5;
-          const preguntaId = pregunta.id; // ✅ Definir preguntaId
-
-          if (isBusinessCanvas) {
-            campoHTML = generarHTMLBusinessCanvas(pregunta, fieldId, columns, kvLimits, rows, rowLabels);
-          } else {
-            const primeraFilaHTML = generarFilaTabla(columns, preguntaId, 0);
-
-            campoHTML = `
-              <div class="dynamic-table-wrapper" data-pregunta-id="${preguntaId}">
-                <div class="dynamic-table-scroll-indicator hidden md:flex items-center justify-center gap-2 mb-2 text-xs text-gray-500">
-                  <i class="fas fa-arrows-alt-h"></i>
-                  <span>Desliza horizontalmente para ver más contenido</span>
-                  <i class="fas fa-arrow-right"></i>
-                </div>
-                
-                <div class="dynamic-table-container overflow-x-auto rounded-xl border border-gray-200 shadow-sm" 
-                    id="dynamic-table-container-${preguntaId}">
-                  <table class="min-w-full bg-white" style="min-width: ${Math.max(500, columns.length * 180)}px;">
-                    <thead class="bg-gray-50 sticky top-0">
-                      <tr>
-                        ${columns.map(col => `
-                          <th class="px-4 py-3 text-left text-sm font-semibold text-gray-700 border-b" style="min-width: 180px;">
-                            <div class="flex items-center space-x-1">
-                              <span>${col.name}</span>
-                              ${col.required ? '<span class="text-red-500 text-xs">*</span>' : ''}
-                              ${col.help ? `
-                                <div class="group relative inline-block">
-                                  <i class="fas fa-question-circle text-gray-400 text-xs cursor-help"></i>
-                                  <div class="hidden group-hover:block absolute z-10 w-64 p-2 mt-1 text-xs text-white bg-gray-800 rounded-lg shadow-lg -left-32">
-                                    ${col.help}
-                                  </div>
-                                </div>
-                              ` : ''}
-                            </div>
-                          </th>
-                        `).join('')}
-                        <th class="px-4 py-3 text-left text-sm font-semibold text-gray-700 border-b w-12 sticky right-0 bg-gray-50 shadow-[-2px_0_5px_-2px_rgba(0,0,0,0.1)]" style="min-width: 60px;">
-                          <i class="fas fa-trash-alt text-red-500"></i>
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody id="table-body-${preguntaId}">
-                      ${primeraFilaHTML}
-                    </tbody>
-                  </table>
-                </div>
-                
-                <div class="flex flex-col sm:flex-row justify-between items-center gap-3 mt-4">
-                  <button type="button" 
-                          onclick="addTableRow(${preguntaId})"
-                          id="btn-add-table-${preguntaId}"
-                          class="w-full sm:w-auto px-4 py-2 bg-secondary bg-opacity-10 hover:bg-opacity-20 text-secondary rounded-lg transition-all duration-300 text-sm font-semibold flex items-center justify-center gap-2">
-                    <i class="fas fa-plus-circle"></i>
-                    <span>Agregar fila</span>
-                  </button>
-                  <span id="table-counter-${preguntaId}" class="text-xs text-gray-500">
-                    1 / ${kvLimits.max} filas
-                  </span>
-                </div>
-                
-                <div class="mt-2 text-xs text-gray-500 flex items-center justify-center gap-2 flex-wrap">
-                  <i class="fas fa-chart-line mr-1 text-accent"></i> 
-                  <span>Mínimo: ${kvLimits.min} ${kvLimits.min === 1 ? 'fila' : 'filas'}</span>
-                  <span>•</span>
-                  <span>Máximo: ${kvLimits.max} filas</span>
-                  <span>•</span>
-                  <span class="hidden sm:inline">Desliza horizontalmente si es necesario</span>
-                </div>
-              </div>
-              <input type="hidden" id="${fieldId}" name="${fieldId}">
-            `;
-          }
-          break;
-        }
-
-        case 'dynamic-list':
-          const listContainer = document.getElementById(`dynamic-list-${pregunta.id}`);
-          if (listContainer) {
-            const items = [];
-            listContainer.querySelectorAll('.dynamic-item input').forEach(input => {
-              if (input.value.trim()) items.push(input.value.trim());
-            });
-            respuestas[pregunta.id] = JSON.stringify(items);
-            const hiddenField = document.getElementById(`respuesta_${pregunta.id}`);
-            if (hiddenField) hiddenField.value = JSON.stringify(items);
-          }
-          break;
-
-        case 'dynamic-tags':
-          if (window.tagsData && window.tagsData[pregunta.id]) {
-            respuestas[pregunta.id] = JSON.stringify(window.tagsData[pregunta.id]);
-            const hiddenField = document.getElementById(`respuesta_${pregunta.id}`);
-            if (hiddenField) hiddenField.value = JSON.stringify(window.tagsData[pregunta.id]);
-          }
-          break;
-
-        default:
-          const campo = document.querySelector(`#respuesta_${pregunta.id}`);
-          if (campo) {
-            respuestas[pregunta.id] = campo.value;
-          }
-          break;
-      }
-      return true;
-    } catch (error) {
-      console.error('Error guardando respuesta:', error);
-      mostrarToast('Error al guardar la respuesta', 'error');
-      return false;
-    }
-  }
-
-  function siguientePregunta() {
-    if (isSubmitting) return;
-
-    // Guardar respuesta actual ANTES de validar
-    const guardadoExitoso = guardarRespuestaActual();
-    if (!guardadoExitoso) return;
-
-    const pregunta = preguntas[indiceActual];
-    const respuesta = respuestas[pregunta.id];
-
-    // Validación específica por tipo
-    let isValid = true;
-
-    switch (pregunta.tipo) {
-      case 'dynamic-keyvalue':
-        isValid = validarCamposRequeridosKV(pregunta.id);
-        break;
-      case 'dynamic-table':
-        isValid = validarTablaRequeridos(pregunta.id);
-        break;
-      case 'dynamic-list':
-        isValid = validarListaRequeridos(pregunta.id);
-        break;
-      default:
-        if (!respuesta || respuesta.trim() === '') {
-          isValid = false;
-          mostrarToast('Por favor, responde la pregunta antes de continuar', 'warning');
-          const campo = document.querySelector(`#respuesta_${pregunta.id}`);
-          if (campo) {
-            campo.classList.add('border-secondary', 'bg-secondary', 'bg-opacity-5');
-            setTimeout(() => {
-              campo.classList.remove('border-secondary', 'bg-secondary', 'bg-opacity-5');
-            }, 2000);
-          }
-        }
-        break;
-    }
-
-    if (!isValid) return;
-
-    if (indiceActual === preguntas.length - 1) {
-      finalizarFormulario();
-    } else {
-      indiceActual++;
-      mostrarPreguntaActual();
-      actualizarProgreso();
-    }
-  }
-
-  function anteriorPregunta() {
-    guardarRespuestaActual();
-    indiceActual--;
-    mostrarPreguntaActual();
+        const primerCampo = container.querySelector('input:not([type="hidden"]), textarea, select');
+        if (primerCampo && !primerCampo.value) primerCampo.focus();
+      }, 100);
+      container.style.transition = 'all 0.3s ease';
+      container.style.opacity = '1';
+      container.style.transform = 'translateX(0)';
+    }, 150);
+
+    document.getElementById('btnAnterior').classList.toggle('hidden', indiceActual === 0);
+    const btnSiguiente = document.getElementById('btnSiguiente');
+    const isLast = indiceActual === preguntas.length - 1;
+    btnSiguiente.innerHTML = isLast ? '<i class="fas fa-check-circle mr-2"></i> Finalizar y Optimizar' : 'Siguiente <i class="fas fa-arrow-right ml-2"></i>';
+    actualizarContador();
     actualizarProgreso();
+  }
+
+  function actualizarContador() {
+    document.getElementById('preguntaContador').innerHTML = `Pregunta ${indiceActual + 1} de ${preguntas.length}`;
   }
 
   function actualizarProgreso() {
@@ -1094,773 +69,20 @@
     document.getElementById('progresoPorcentaje').textContent = `${Math.round(progreso)}%`;
   }
 
-  function actualizarContador() {
-    document.getElementById('preguntaContador').innerHTML = `
-        Pregunta ${indiceActual + 1} de ${preguntas.length}
-      `;
-  }
-
-  async function finalizarFormulario() {
-    guardarRespuestaActual();
-    isSubmitting = true;
-
-    const loadingOverlay = document.getElementById('loadingOverlay');
-    loadingOverlay.classList.remove('hidden');
-    loadingOverlay.classList.add('flex');
-
-    const messages = [
-      'Analizando respuestas...',
-      'Aplicando inteligencia artificial...',
-      'Optimizando redacción...',
-      'Generando insights...',
-      'Actualizando presentaciones...'
-    ];
-    let msgIndex = 0;
-    const msgInterval = setInterval(() => {
-      document.getElementById('loadingMessage').textContent = messages[msgIndex % messages.length];
-      msgIndex++;
-    }, 2000);
-
-    try {
-      const respuestasOptimizadas = await new Promise((resolve, reject) => {
-        google.script.run
-          .withSuccessHandler(resolve)
-          .withFailureHandler(reject)
-          .optimizarRespuestasConIA(respuestas);
-      });
-
-      await new Promise((resolve, reject) => {
-        google.script.run
-          .withSuccessHandler(resolve)
-          .withFailureHandler(reject)
-          .guardarRespuestasEnSlides(respuestasOptimizadas);
-      });
-
-      clearInterval(msgInterval);
-      loadingOverlay.classList.add('hidden');
-
-      Swal.fire({
-        title: '¡Éxito!',
-        text: 'Los datos han sido procesados y las diapositivas actualizadas correctamente',
-        icon: 'success',
-        confirmButtonText: '<i class="fas fa-check mr-2"></i>Finalizar',
-        confirmButtonColor: '#6366f1',
-        background: 'white',
-        backdrop: true,
-        timer: 3000,
-        timerProgressBar: true
-      }).then(() => {
-        google.script.host.close();
-      });
-
-    } catch (error) {
-      clearInterval(msgInterval);
-      loadingOverlay.classList.add('hidden');
-
-      Swal.fire({
-        title: 'Error',
-        text: error.message || 'Ocurrió un error al procesar los datos',
-        icon: 'error',
-        confirmButtonText: 'Intentar de nuevo',
-        confirmButtonColor: '#ef4444'
-      });
-
-      isSubmitting = false;
-    }
-  }
-
-  function mostrarToast(mensaje, tipo = 'info') {
-    const toastContainer = document.getElementById('toastContainer');
-    const toast = document.createElement('div');
-
-    const colores = {
-      success: 'bg-green-500',
-      error: 'bg-red-500',
-      warning: 'bg-yellow-500',
-      info: 'bg-blue-500'
-    };
-
-    const iconos = {
-      success: 'fa-check-circle',
-      error: 'fa-exclamation-circle',
-      warning: 'fa-exclamation-triangle',
-      info: 'fa-info-circle'
-    };
-
-    toast.className = `${colores[tipo]} text-white px-6 py-3 rounded-lg shadow-lg flex items-center space-x-3 animate-slide-up`;
-    toast.innerHTML = `
-        <i class="fas ${iconos[tipo]} text-xl"></i>
-        <span>${mensaje}</span>
-      `;
-
-    toastContainer.appendChild(toast);
-
-    setTimeout(() => {
-      toast.style.opacity = '0';
-      toast.style.transform = 'translateX(100px)';
-      toast.style.transition = 'all 0.3s ease';
-      setTimeout(() => toast.remove(), 300);
-    }, 3000);
-  }
-
-
-  function addDynamicItem(preguntaId) {
-    const container = document.getElementById(`dynamic-list-${preguntaId}`);
-    const newItem = document.createElement('div');
-    newItem.className = 'dynamic-item flex gap-2 mt-2';
-    newItem.innerHTML = `
-    <input type="text" 
-           class="flex-1 px-4 py-3 border-2 border-gray-300 rounded-xl focus:border-secondary focus:ring-4 focus:ring-secondary focus:ring-opacity-20 transition-all duration-300"
-           placeholder="Ingresa un item...">
-    <button type="button" 
-            onclick="removeDynamicItem(this)"
-            class="px-4 py-3 bg-red-100 hover:bg-red-200 text-red-600 rounded-xl transition-all duration-300">
-      <i class="fas fa-trash-alt"></i>
-    </button>
-  `;
-    container.insertBefore(newItem, container.lastElementChild);
-    updateHiddenField(preguntaId);
-  }
-
-  function removeDynamicItem(button) {
-    const item = button.closest('.dynamic-item');
-    const container = item.parentElement;
-    if (container.children.length > 2) { // Mantener al menos un item
-      item.remove();
-      const preguntaId = container.id.split('-').pop();
-      updateHiddenField(preguntaId);
-    } else {
-      mostrarToast('Debe haber al menos un item', 'warning');
-    }
-  }
-
-
-  let tableValidations = {};
-
-
-  // Funciones para Dynamic Table
-  function addTableRow(preguntaId) {
-    try {
-      if (!preguntaId) {
-        console.error('addTableRow: preguntaId no definido');
-        return;
-      }
-      const container = document.getElementById(`dynamic-table-${preguntaId}`);
-      const tbody = document.getElementById(`table-body-${preguntaId}`);
-
-      if (!container) {
-        console.error(`No se encontró el contenedor dynamic-table-${preguntaId}`);
-        mostrarToast('Error: No se pudo agregar la fila', 'error');
-        return;
-      }
-
-      if (!tbody) {
-        console.error(`No se encontró el tbody table-body-${preguntaId}`);
-        mostrarToast('Error: Estructura de tabla no encontrada', 'error');
-        return;
-      }
-
-      const max = parseInt(container.dataset?.max || 20);
-      const currentRows = tbody.querySelectorAll('.table-row').length;
-
-      if (currentRows >= max) {
-        mostrarToast(`Máximo ${max} filas permitidas`, 'warning');
-        return;
-      }
-
-      const pregunta = preguntas.find(p => p.id === preguntaId);
-      if (!pregunta) {
-        console.error(`No se encontró la pregunta con ID ${preguntaId}`);
-        return;
-      }
-
-      const columns = pregunta.columns || [];
-      const newRowIndex = currentRows;
-
-      const newRowHTML = generarFilaTabla(columns, preguntaId, newRowIndex);
-      tbody.insertAdjacentHTML('beforeend', newRowHTML);
-
-      updateTableCounter(preguntaId);
-      updateTableHiddenField(preguntaId);
-      checkHorizontalScroll(preguntaId);
-    } catch (error) {
-      console.log(error);
-    }
-  }
-
-  function updateTableHiddenField(preguntaId) {
-    try {
-      if (!preguntaId) return;
-
-      const hiddenField = document.getElementById(`respuesta_${preguntaId}`);
-      const tbody = document.getElementById(`table-body-${preguntaId}`);
-
-      if (!hiddenField) {
-        console.warn(`No se encontró el campo hidden respuesta_${preguntaId}`);
-        return;
-      }
-
-      if (!tbody) {
-        console.warn(`No se encontró table-body-${preguntaId}`);
-        return;
-      }
-
-      const pregunta = preguntas.find(p => p.id === preguntaId);
-      if (!pregunta) {
-        console.warn(`No se encontró la pregunta con ID ${preguntaId}`);
-        return;
-      }
-
-      const columns = pregunta.columns || [];
-      const tableData = [];
-      let rows = [];
-
-      try {
-        rows = tbody.querySelectorAll('.table-row');
-      } catch (error) {
-        console.error('Error al obtener filas:', error);
-        rows = [];
-      }
-
-      rows.forEach((row, rowIndex) => {
-        const rowData = {};
-        let hasData = false;
-
-        columns.forEach((col, colIndex) => {
-          try {
-            const input = row.querySelector(`[data-col="${colIndex}"]`);
-            if (input) {
-              let value = '';
-              if (input.tagName === 'SELECT') {
-                value = input.options[input.selectedIndex]?.value || '';
-              } else {
-                value = input.value?.trim() || '';
-              }
-
-              if (value) {
-                rowData[col.name] = value;
-                hasData = true;
-              } else if (col.required) {
-                rowData[col.name] = '';
-              }
-            }
-          } catch (error) {
-            console.error(`Error al procesar columna ${colIndex} fila ${rowIndex}:`, error);
-          }
-        });
-
-        if (hasData || rows.length === 1) {
-          tableData.push(rowData);
-        }
-      });
-
-      const jsonData = JSON.stringify(tableData);
-      hiddenField.value = jsonData;
-
-      if (respuestas) {
-        respuestas[preguntaId] = jsonData;
-      }
-    } catch (error) {
-      console.log(error)
-    }
-  }
-
-
-  function validarTablaRequeridos(preguntaId) {
-    try {
-      const tbody = document.getElementById(`table-body-${preguntaId}`);
-      // ✅ CORREGIDO: Buscar el contenedor con el ID correcto
-      const container = document.getElementById(`dynamic-table-${preguntaId}`);
-
-      // ✅ Validar que los elementos existen
-      if (!tbody) {
-        console.warn(`No se encontró table-body-${preguntaId}`);
-        return true; // Si no hay tabla, considerar válido
-      }
-
-      if (!container) {
-        console.warn(`No se encontró dynamic-table-${preguntaId}`);
-        return true; // Si no hay contenedor, considerar válido
-      }
-
-      const min = parseInt(container.dataset?.min || 1);
-      const rows = tbody.querySelectorAll('.table-row');
-      const pregunta = preguntas.find(p => p.id === preguntaId);
-
-      if (!pregunta) {
-        console.warn(`No se encontró la pregunta con ID ${preguntaId}`);
-        return true;
-      }
-
-      const columns = pregunta.columns || [];
-      let isValid = true;
-      let errorMessages = [];
-
-      // Validar cantidad mínima de filas
-      if (rows.length < min) {
-        isValid = false;
-        errorMessages.push(`Mínimo ${min} ${min === 1 ? 'fila' : 'filas'} requerida(s)`);
-      }
-
-      // Validar campos requeridos en cada fila
-      rows.forEach((row, rowIndex) => {
-        let rowHasData = false;
-
-        columns.forEach((col, colIndex) => {
-          const input = row.querySelector(`[data-col="${colIndex}"]`);
-          if (input) {
-            let value = '';
-            if (input.tagName === 'SELECT') {
-              value = input.value;
-            } else {
-              value = input.value?.trim() || '';
-            }
-
-            if (value) {
-              rowHasData = true;
-            }
-
-            if (col.required && !value) {
-              isValid = false;
-              errorMessages.push(`Fila ${rowIndex + 1}: El campo "${col.name}" es requerido`);
-              input.classList.add('border-red-500', 'bg-red-50');
-            } else {
-              input.classList.remove('border-red-500', 'bg-red-50');
-            }
-          }
-        });
-
-        // Si la fila está completamente vacía y no es la única fila, considerarla inválida
-        if (!rowHasData && rows.length > min) {
-          isValid = false;
-          errorMessages.push(`Fila ${rowIndex + 1}: Está vacía. Por favor, completa o elimina la fila`);
-        }
-      });
-
-      if (!isValid) {
-        mostrarToast(errorMessages.join(', '), 'error');
-        return false;
-      }
-
-      return true;
-    } catch (error) {
-      console.error('Error en validarTablaRequeridos:', error);
-      return true; // En caso de error, permitir continuar
-    }
-  }
-
-
-  function crearFilaTablaResponsive(columns, preguntaId, rowIndex, rowData = {}) {
-    try {
-      if (!preguntaId) {
-        console.error('preguntaId no definido en crearFilaTablaResponsive');
-        return '';
-      }
-
-      if (!columns || !Array.isArray(columns)) {
-        console.error('columns no es un array válido');
-        return '';
-      }
-
-      let html = '';
-
-      html += `<tr class="table-row hover:bg-gray-50 transition-colors border-b" data-row-index="${rowIndex}">`;
-
-      columns.forEach((col, colIndex) => {
-        const value = (rowData && rowData[col.name]) ? rowData[col.name] : '';
-
-        switch (col.type) {
-          case 'select':
-            html += `
-            <td class="px-4 py-2 align-top">
-              <select class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-secondary focus:ring-2 focus:ring-secondary focus:ring-opacity-20 transition-all text-sm"
-                      data-pregunta="${preguntaId}"
-                      data-row="${rowIndex}"
-                      data-col="${colIndex}"
-                      data-col-name="${escapeHtml(col.name)}"
-                      ${col.required ? 'required' : ''}
-                      onchange="updateTableHiddenField(${preguntaId})">
-                <option value="">${escapeHtml(col.placeholder || 'Selecciona...')}</option>
-                ${col.options ? col.options.map(opt => `<option value="${escapeHtml(opt)}" ${value === opt ? 'selected' : ''}>${escapeHtml(opt)}</option>`).join('') : ''}
-              </select>
-              ${col.help ? `<p class="text-xs text-gray-400 mt-1 hidden md:block">${escapeHtml(col.help)}</p>` : ''}
-            </td>
-          `;
-            break;
-
-          case 'textarea':
-            html += `
-            <td class="px-4 py-2 align-top">
-              <textarea rows="2"
-                        class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-secondary focus:ring-2 focus:ring-secondary focus:ring-opacity-20 transition-all resize-y text-sm"
-                        placeholder="${escapeHtml(col.placeholder || 'Describe...')}"
-                        data-pregunta="${preguntaId}"
-                        data-row="${rowIndex}"
-                        data-col="${colIndex}"
-                        data-col-name="${escapeHtml(col.name)}"
-                        ${col.required ? 'required' : ''}
-                        oninput="updateTableHiddenField(${preguntaId})">${escapeHtml(value)}</textarea>
-              ${col.help ? `<p class="text-xs text-gray-400 mt-1 hidden md:block">${escapeHtml(col.help)}</p>` : ''}
-            </td>
-          `;
-            break;
-
-          default:
-            html += `
-            <td class="px-4 py-2 align-top">
-              <input type="${col.type || 'text'}" 
-                     class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-secondary focus:ring-2 focus:ring-secondary focus:ring-opacity-20 transition-all text-sm"
-                     placeholder="${escapeHtml(col.placeholder || 'Ingresa información...')}"
-                     value="${escapeHtml(value)}"
-                     data-pregunta="${preguntaId}"
-                     data-row="${rowIndex}"
-                     data-col="${colIndex}"
-                     data-col-name="${escapeHtml(col.name)}"
-                     ${col.required ? 'required' : ''}
-                     oninput="updateTableHiddenField(${preguntaId})">
-              ${col.help ? `<p class="text-xs text-gray-400 mt-1 hidden md:block">${escapeHtml(col.help)}</p>` : ''}
-            </td>
-          `;
-            break;
-        }
-      });
-
-      html += `
-      <td class="px-4 py-2 text-center align-top sticky right-0 bg-white shadow-[-2px_0_5px_-2px_rgba(0,0,0,0.1)]">
-        <button type="button" 
-                onclick="removeTableRow(this, ${preguntaId})"
-                class="text-red-500 hover:text-red-700 transition-colors p-2 rounded-lg hover:bg-red-50">
-          <i class="fas fa-trash-alt text-lg"></i>
-        </button>
-      </td>
-    `;
-
-      html += '</tr>';
-
-      return html;
-    } catch (error) {
-      console.log(error);
-      return '';
-    }
-  }
-
-
-  // Variables para almacenar datos de validación
-  let kvValidations = {};
-
-  // Funciones para Dynamic Key-Value
-  function addKVItem(preguntaId) {
-    try {
-      const container = document.getElementById(`dynamic-kv-${preguntaId}`);
-      const max = parseInt(container.dataset.max);
-      const currentItems = container.querySelectorAll('.kv-item').length;
-
-      // Validar límite máximo
-      if (currentItems >= max) {
-        mostrarToast(`Máximo ${max} pares permitidos`, 'warning');
-        return;
-      }
-
-      // Obtener configuraciones de la pregunta original
-      const pregunta = preguntas.find(p => p.id === preguntaId);
-      const keyConfig = pregunta.keyConfig;
-      const valueConfig = pregunta.valueConfig;
-      const newIndex = currentItems;
-
-      const newItem = document.createElement('div');
-      newItem.className = 'kv-item flex gap-2 items-start mt-2';
-      newItem.innerHTML = `
-     ${generarInputKeyValue(keyConfig, 'key', preguntaId, newIndex)}
-     ${generarInputKeyValue(valueConfig, 'value', preguntaId, newIndex)}
-     <button type="button" 
-             onclick="removeKVItem(this, ${preguntaId})"
-             class="px-4 py-3 bg-red-100 hover:bg-red-200 text-red-600 rounded-xl transition-all duration-300">
-       <i class="fas fa-trash-alt"></i>
-     </button>
-   `;
-
-      const buttonContainer = container.querySelector('.flex.justify-between');
-      container.insertBefore(newItem, buttonContainer);
-
-      updateKVCounter(preguntaId);
-      updateHiddenField(preguntaId);
-    } catch (error) {
-      console.log(error)
-    }
-  }
-
-  function removeKVItem(button, preguntaId) {
-    try {
-      const item = button.closest('.kv-item');
-      const container = document.getElementById(`dynamic-kv-${preguntaId}`);
-      const min = parseInt(container.dataset.min);
-      const currentItems = container.querySelectorAll('.kv-item').length;
-
-      // Validar límite mínimo
-      if (currentItems <= min) {
-        mostrarToast(`Mínimo ${min} par(es) requerido(s)`, 'warning');
-        return;
-      }
-
-      item.remove();
-
-      // Reindexar los inputs restantes
-      reindexKVItems(preguntaId);
-      updateKVCounter(preguntaId);
-      updateHiddenField(preguntaId);
-    } catch (error) {
-      console.log(error)
-    }
-  }
-
-  function reindexKVItems(preguntaId) {
-    try {
-      const container = document.getElementById(`dynamic-kv-${preguntaId}`);
-      const items = container.querySelectorAll('.kv-item');
-
-      items.forEach((item, newIndex) => {
-        // Actualizar todos los inputs dentro del item
-        const inputs = item.querySelectorAll('input, select, textarea');
-        inputs.forEach(input => {
-          const currentType = input.getAttribute('data-type');
-          if (currentType) {
-            input.setAttribute('data-index', newIndex);
-            // Actualizar name si es necesario
-            const name = `${currentType}_${preguntaId}_${newIndex}`;
-            input.setAttribute('name', name);
-          }
-        });
-      });
-    } catch (error) {
-      console.log(error)
-    }
-  }
-
-  function updateKVCounter(preguntaId) {
-    try {
-      const container = document.getElementById(`dynamic-kv-${preguntaId}`);
-      const currentItems = container.querySelectorAll('.kv-item').length;
-      const max = parseInt(container.dataset.max);
-      const counter = document.getElementById(`kv-counter-${preguntaId}`);
-
-      if (counter) {
-        counter.textContent = `${currentItems} / ${max}`;
-      }
-
-      // Habilitar/deshabilitar botón de agregar según límite
-      const addButton = document.getElementById(`btn-add-kv-${preguntaId}`);
-      if (addButton) {
-        if (currentItems >= max) {
-          addButton.disabled = true;
-          addButton.classList.add('opacity-50', 'cursor-not-allowed');
-        } else {
-          addButton.disabled = false;
-          addButton.classList.remove('opacity-50', 'cursor-not-allowed');
-        }
-      }
-    } catch (error) {
-      console.log(error)
-    }
-  }
-
-  // Funciones para Dynamic Tags
-  let tagsData = {};
-
-  function addTag(preguntaId) {
-    try {
-      const input = document.getElementById(`tag-input-${preguntaId}`);
-      const tagValue = input.value.trim();
-
-      if (!tagValue) {
-        mostrarToast('Por favor escribe una etiqueta', 'warning');
-        return;
-      }
-
-      if (!tagsData[preguntaId]) {
-        tagsData[preguntaId] = [];
-      }
-
-      if (tagsData[preguntaId].includes(tagValue)) {
-        mostrarToast('Esta etiqueta ya existe', 'warning');
-        return;
-      }
-
-      tagsData[preguntaId].push(tagValue);
-
-      const container = document.getElementById(`tags-container-${preguntaId}`);
-      const tagElement = document.createElement('span');
-      tagElement.className = 'inline-flex items-center gap-2 px-3 py-1.5 bg-secondary bg-opacity-10 text-secondary rounded-full text-sm font-medium';
-      tagElement.innerHTML = `
-     ${tagValue}
-     <button type="button" 
-             onclick="removeTag(${preguntaId}, '${tagValue}')"
-             class="hover:text-red-600 transition-colors">
-       <i class="fas fa-times-circle text-xs"></i>
-     </button>
-   `;
-      container.appendChild(tagElement);
-
-      input.value = '';
-      updateHiddenField(preguntaId);
-    } catch (error) {
-      console.log(error)
-    }
-  }
-
-  function handleTagKeyPress(event, preguntaId) {
-    try {
-      if (event.key === 'Enter') {
-        event.preventDefault();
-        addTag(preguntaId);
-      }
-    } catch (error) {
-      console.log(error)
-    }
-  }
-
-  function removeTag(preguntaId, tagValue) {
-    tagsData[preguntaId] = tagsData[preguntaId].filter(t => t !== tagValue);
-    const container = document.getElementById(`tags-container-${preguntaId}`);
-    const tagElements = container.querySelectorAll('span');
-    tagElements.forEach(tag => {
-      if (tag.textContent.replace('×', '').trim() === tagValue) {
-        tag.remove();
-      }
-    });
-    updateHiddenField(preguntaId);
-  }
-
-  // Función para actualizar campo hidden con todos los valores
-  function updateHiddenField(preguntaId) {
-    const hiddenField = document.getElementById(`respuesta_${preguntaId}`);
-    const container = document.getElementById(`dynamic-kv-${preguntaId}`);
-    const kvData = {};
-
-    container.querySelectorAll('.kv-item').forEach(item => {
-      const keyInput = item.querySelector('[data-type="key"]');
-      const valueInput = item.querySelector('[data-type="value"]');
-
-      let key = '';
-      let value = '';
-
-      // Obtener valor según tipo de input
-      if (keyInput) {
-        key = keyInput.value.trim();
-      }
-
-      if (valueInput) {
-        if (valueInput.type === 'select-one') {
-          value = valueInput.options[valueInput.selectedIndex]?.text || '';
-        } else {
-          value = valueInput.value.trim();
-        }
-      }
-
-      if (key && value) {
-        kvData[key] = value;
-      }
-    });
-
-    if (hiddenField) {
-      hiddenField.value = JSON.stringify(kvData);
-    }
-  }
-
-  function validarCamposRequeridosKV(preguntaId) {
-    const container = document.getElementById(`dynamic-kv-${preguntaId}`);
-    const items = container.querySelectorAll('.kv-item');
-    const min = parseInt(container.dataset.min);
-    let isValid = true;
-    let errorMessages = [];
-
-    // Validar cantidad mínima
-    if (items.length < min) {
-      isValid = false;
-      errorMessages.push(`Mínimo ${min} par(es) requerido(s)`);
-    }
-
-    // Validar campos requeridos
-    items.forEach((item, idx) => {
-      const keyInput = item.querySelector('[data-type="key"]');
-      const valueInput = item.querySelector('[data-type="value"]');
-
-      if (keyInput && keyInput.hasAttribute('required') && !keyInput.value.trim()) {
-        isValid = false;
-        errorMessages.push(`Par ${idx + 1}: El campo clave es requerido`);
-        keyInput.classList.add('border-red-500', 'bg-red-50');
-      } else if (keyInput) {
-        keyInput.classList.remove('border-red-500', 'bg-red-50');
-      }
-
-      if (valueInput && valueInput.hasAttribute('required') && !valueInput.value.trim()) {
-        isValid = false;
-        errorMessages.push(`Par ${idx + 1}: El campo valor es requerido`);
-        valueInput.classList.add('border-red-500', 'bg-red-50');
-      } else if (valueInput) {
-        valueInput.classList.remove('border-red-500', 'bg-red-50');
-      }
-    });
-
-    if (!isValid) {
-      mostrarToast(errorMessages.join(', '), 'error');
-      return false;
-    }
-
-    return true;
-  }
-
-
-  // Sobrescribir guardarRespuestaActual para manejar campos dinámicos
+  // ==================== GUARDADO Y VALIDACIÓN ====================
   function guardarRespuestaActual() {
     const pregunta = preguntas[indiceActual];
     if (!pregunta) return true;
 
     try {
       switch (pregunta.tipo) {
-        case 'dynamic-keyvalue':
-          updateHiddenField(pregunta.id);
-          const kvHiddenField = document.getElementById(`respuesta_${pregunta.id}`);
-          if (kvHiddenField && kvHiddenField.value) {
-            respuestas[pregunta.id] = kvHiddenField.value;
-          }
+        case 'matrix-checkbox':
+          updateMatrixHiddenField(pregunta.id);
+          respuestas[pregunta.id] = document.getElementById(`respuesta_${pregunta.id}`).value;
           break;
-
-        case 'dynamic-table':
-          // Actualizar el hidden field con los datos actuales
-          updateTableHiddenField(pregunta.id);
-          const tableHiddenField = document.getElementById(`respuesta_${pregunta.id}`);
-          if (tableHiddenField && tableHiddenField.value) {
-            respuestas[pregunta.id] = tableHiddenField.value;
-            console.log(`Tabla guardada para pregunta ${pregunta.id}:`, tableHiddenField.value); // Debug
-          }
-          break;
-
-        case 'dynamic-list':
-          const listContainer = document.getElementById(`dynamic-list-${pregunta.id}`);
-          if (listContainer) {
-            const items = [];
-            listContainer.querySelectorAll('.dynamic-item input').forEach(input => {
-              if (input.value.trim()) items.push(input.value.trim());
-            });
-            respuestas[pregunta.id] = JSON.stringify(items);
-            const hiddenField = document.getElementById(`respuesta_${pregunta.id}`);
-            if (hiddenField) hiddenField.value = JSON.stringify(items);
-          }
-          break;
-
-        case 'dynamic-tags':
-          if (window.tagsData && window.tagsData[pregunta.id]) {
-            respuestas[pregunta.id] = JSON.stringify(window.tagsData[pregunta.id]);
-            const hiddenField = document.getElementById(`respuesta_${pregunta.id}`);
-            if (hiddenField) hiddenField.value = JSON.stringify(window.tagsData[pregunta.id]);
-          }
-          break;
-
         default:
           const campo = document.querySelector(`#respuesta_${pregunta.id}`);
-          if (campo) {
-            respuestas[pregunta.id] = campo.value;
-          }
+          if (campo) respuestas[pregunta.id] = campo.value;
           break;
       }
       return true;
@@ -1870,708 +92,193 @@
       return false;
     }
   }
-  function generarInputKeyValue(config, type, preguntaId, index) {
-    const baseClass = "flex-1 px-4 py-3 border-2 border-gray-300 rounded-xl focus:border-secondary focus:ring-4 focus:ring-secondary focus:ring-opacity-20 transition-all duration-300";
-    const requiredAttr = config.required ? 'required' : '';
-    const fieldName = `${type}_${preguntaId}_${index}`;
 
-    switch (config.type) {
-      case 'select':
-        return `
-        <select class="${baseClass} cursor-pointer" 
-                data-type="${type}"
-                data-pregunta="${preguntaId}"
-                data-index="${index}"
-                ${requiredAttr}>
-          <option value="">${config.placeholder}</option>
-          ${config.options.map(opt => `<option value="${opt}">${opt}</option>`).join('')}
-        </select>
-      `;
+  function validarRespuestaActual() {
+    const pregunta = preguntas[indiceActual];
+    if (!pregunta) return true;
 
-      case 'textarea':
-        return `
-        <textarea class="${baseClass} resize-none" 
-                  rows="3"
-                  data-type="${type}"
-                  data-pregunta="${preguntaId}"
-                  data-index="${index}"
-                  placeholder="${config.placeholder}"
-                  ${requiredAttr}></textarea>
-      `;
-
-      case 'number':
-        return `
-        <input type="number" 
-               class="${baseClass}"
-               data-type="${type}"
-               data-pregunta="${preguntaId}"
-               data-index="${index}"
-               placeholder="${config.placeholder}"
-               min="${config.min || 0}"
-               step="${config.step || 1}"
-               ${requiredAttr}>
-      `;
-
-      case 'date':
-        return `
-        <input type="date" 
-               class="${baseClass}"
-               data-type="${type}"
-               data-pregunta="${preguntaId}"
-               data-index="${index}"
-               placeholder="${config.placeholder}"
-               ${requiredAttr}>
-      `;
-
-      default: // text
-        return `
-        <input type="text" 
-               class="${baseClass}"
-               data-type="${type}"
-               data-pregunta="${preguntaId}"
-               data-index="${index}"
-               placeholder="${config.placeholder}"
-               ${requiredAttr}>
-      `;
+    switch (pregunta.tipo) {
+      case 'matrix-checkbox':
+        const sel = window.matrixSelections[pregunta.id];
+        if (!sel || (!sel.selected && Object.keys(sel.combinations || {}).length === 0)) {
+          mostrarToast('Selecciona al menos una opción', 'warning');
+          return false;
+        }
+        return true;
+      default:
+        const respuesta = respuestas[pregunta.id];
+        if (!respuesta || respuesta.trim() === '') {
+          mostrarToast('Por favor, responde la pregunta', 'warning');
+          const campo = document.querySelector(`#respuesta_${pregunta.id}`);
+          if (campo) campo.classList.add('border-red-500', 'bg-red-50');
+          return false;
+        }
+        return true;
     }
   }
 
+  function siguientePregunta() {
+    if (isSubmitting) return;
+    if (!guardarRespuestaActual()) return;
+    if (!validarRespuestaActual()) return;
 
-  function generarFilaTabla(columns, preguntaId, rowIndex, rowData = {}) {
+    if (indiceActual === preguntas.length - 1) {
+      finalizarFormulario();
+    } else {
+      indiceActual++;
+      mostrarPreguntaActual();
+    }
+  }
+
+  function anteriorPregunta() {
+    guardarRespuestaActual();
+    indiceActual--;
+    mostrarPreguntaActual();
+  }
+
+  // ==================== FINALIZAR ====================
+  async function finalizarFormulario() {
+    guardarRespuestaActual();
+    isSubmitting = true;
+    const loadingOverlay = document.getElementById('loadingOverlay');
+    loadingOverlay.classList.remove('hidden');
+    loadingOverlay.classList.add('flex');
+
+    const messages = ['Analizando respuestas...', 'Aplicando IA...', 'Optimizando redacción...', 'Generando insights...', 'Actualizando presentaciones...'];
+    let msgIndex = 0;
+    const msgInterval = setInterval(() => {
+      document.getElementById('loadingMessage').textContent = messages[msgIndex % messages.length];
+      msgIndex++;
+    }, 2000);
 
     try {
-      let html = '';
-
-      html += '<tr class="table-row hover:bg-gray-50 transition-colors border-b" data-row-index="' + rowIndex + '">';
-
-      columns.forEach((col, colIndex) => {
-        const value = rowData[col.name] || '';
-
-        switch (col.type) {
-          case 'select':
-            html += `
-           <td class="px-4 py-2 align-top">
-             <select class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-secondary focus:ring-2 focus:ring-secondary focus:ring-opacity-20 transition-all text-sm"
-                     data-pregunta="${preguntaId}"
-                     data-row="${rowIndex}"
-                     data-col="${colIndex}"
-                     data-col-name="${col.name}"
-                     ${col.required ? 'required' : ''}
-                     onchange="updateTableHiddenField(${preguntaId})">
-               <option value="">${col.placeholder || 'Selecciona...'}</option>
-               ${col.options ? col.options.map(opt => `<option value="${opt}" ${value === opt ? 'selected' : ''}>${opt}</option>`).join('') : ''}
-             </select>
-           </td>
-         `;
-            break;
-
-          case 'textarea':
-            html += `
-           <td class="px-4 py-2 align-top">
-             <textarea rows="2"
-                       class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-secondary focus:ring-2 focus:ring-secondary focus:ring-opacity-20 transition-all resize-y text-sm"
-                       placeholder="${col.placeholder || 'Describe...'}"
-                       data-pregunta="${preguntaId}"
-                       data-row="${rowIndex}"
-                       data-col="${colIndex}"
-                       data-col-name="${col.name}"
-                       ${col.required ? 'required' : ''}
-                       oninput="updateTableHiddenField(${preguntaId})">${escapeHtml(value)}</textarea>
-           </td>
-         `;
-            break;
-
-          default:
-            html += `
-           <td class="px-4 py-2 align-top">
-             <input type="${col.type || 'text'}" 
-                    class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-secondary focus:ring-2 focus:ring-secondary focus:ring-opacity-20 transition-all text-sm"
-                    placeholder="${col.placeholder || 'Ingresa información...'}"
-                    value="${escapeHtml(value)}"
-                    data-pregunta="${preguntaId}"
-                    data-row="${rowIndex}"
-                    data-col="${colIndex}"
-                    data-col-name="${col.name}"
-                    ${col.required ? 'required' : ''}
-                    oninput="updateTableHiddenField(${preguntaId})">
-           </td>
-         `;
-            break;
-        }
+      const resultado = await new Promise((resolve, reject) => {
+        google.script.run.withSuccessHandler(resolve).withFailureHandler(reject).procesarFormulario(respuestas);
       });
-
-      html += `
-     <td class="px-4 py-2 text-center align-top sticky right-0 bg-white shadow-[-2px_0_5px_-2px_rgba(0,0,0,0.1)]">
-       <button type="button" 
-               onclick="removeTableRow(this, ${preguntaId})"
-               class="text-red-500 hover:text-red-700 transition-colors p-2 rounded-lg hover:bg-red-50">
-         <i class="fas fa-trash-alt text-lg"></i>
-       </button>
-     </td>
-   `;
-
-      html += '</tr>';
-
-      return html;
+      
+      clearInterval(msgInterval);
+      loadingOverlay.classList.add('hidden');
+      localStorage.removeItem('formulario_digital_borrador');
+      Swal.fire({
+        title: '¡Presentación Generada!', 
+        html: `Tus respuestas han sido procesadas.<br><br><a href="${resultado.url}" target="_blank" class="text-indigo-600 font-bold hover:underline" style="font-size: 1.1em;">👉 Abrir Presentación en Google Slides 👈</a>`, 
+        icon: 'success',
+        confirmButtonText: 'Finalizar', confirmButtonColor: '#6366f1'
+      }).then(() => google.script.host.close());
     } catch (error) {
-      console.log(error)
+      clearInterval(msgInterval);
+      loadingOverlay.classList.add('hidden');
+      Swal.fire({ title: 'Error', text: error.message, icon: 'error', confirmButtonText: 'Intentar de nuevo' });
+      isSubmitting = false;
     }
   }
 
-  // Variable para almacenar selecciones
-  let matrixSelections = {};
+  // ==================== FUNCIONES DE RENDERIZADO ====================
+  function getIconForType(tipo) {
+    const icons = { 'textarea': 'fa-align-left', 'matrix-checkbox': 'fa-chart-line' };
+    return icons[tipo] || 'fa-question-circle';
+  }
 
-  function handleMatrixSelection(preguntaId, checkbox, multipleSelection) {
-    const combo = checkbox.getAttribute('data-combo');
-    const isChecked = checkbox.checked;
+  function generarHTMLPregunta(pregunta) {
+    const fieldId = `respuesta_${pregunta.id}`;
+    let campoHTML = '';
 
-    // Inicializar selecciones para esta pregunta si no existe
-    if (!matrixSelections[preguntaId]) {
-      matrixSelections[preguntaId] = {
-        selected: null,
-        multiple: multipleSelection === 'true',
-        combinations: {}
-      };
+    switch (pregunta.tipo) {
+      case 'matrix-checkbox':
+        campoHTML = generarHTMLMatrix(pregunta);
+        break;
+      default:
+        campoHTML = `<textarea id="${fieldId}" rows="5" class="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:border-accent focus:ring-4 focus:ring-accent focus:ring-opacity-20 transition-all duration-300 resize-none" placeholder="Escribe tu respuesta detallada aquí..."></textarea><div class="mt-2 text-xs text-gray-500"><i class="fas fa-info-circle mr-1 text-accent"></i> Sé específico y detallado</div>`;
     }
 
-    const selections = matrixSelections[preguntaId];
 
-    if (!selections.multiple) {
-      // Selección única - desmarcar todos los demás
-      if (isChecked) {
-        // Desmarcar todos los checkboxes
-        const allCheckboxes = document.querySelectorAll(`#matrix-container-${preguntaId} .matrix-checkbox`);
-        allCheckboxes.forEach(cb => {
-          if (cb !== checkbox) {
-            cb.checked = false;
-          }
-        });
-        selections.selected = combo;
-        showMatrixFeedback(preguntaId, combo, 'success');
-      } else {
-        selections.selected = null;
-        showMatrixFeedback(preguntaId, null, 'info');
-      }
-    } else {
-      // Selección múltiple
-      if (isChecked) {
-        selections.combinations[combo] = true;
-        showMatrixFeedback(preguntaId, Object.keys(selections.combinations).join(', '), 'info');
-      } else {
-        delete selections.combinations[combo];
-        const remaining = Object.keys(selections.combinations);
-        if (remaining.length > 0) {
-          showMatrixFeedback(preguntaId, remaining.join(', '), 'info');
-        } else {
-          showMatrixFeedback(preguntaId, null, 'info');
-        }
-      }
+    return `<div class="animate-slide-up"><div class="mb-4 flex items-start space-x-3"><div class="flex-shrink-0 w-10 h-10 bg-secondary rounded-xl flex items-center justify-center text-white shadow-lg"><i class="fas ${getIconForType(pregunta.tipo)} text-lg"></i></div><div class="flex-1"><label class="block text-xl font-bold text-primary mb-3">${pregunta.numero}. ${pregunta.texto}</label>${campoHTML}</div></div>${pregunta.ayuda ? `<div class="ml-13 mt-3 p-3 bg-accent bg-opacity-5 rounded-lg border border-accent border-opacity-20"><i class="fas fa-lightbulb text-accent mr-2"></i><span class="text-sm text-gray-700">${pregunta.ayuda}</span></div>` : ''}</div>`;
+  }
+
+
+  function generarHTMLMatrix(pregunta) {
+    const matrixConfig = pregunta.matrixConfig;
+    const rows = matrixConfig?.rows || [];
+    const columns = matrixConfig?.columns || [];
+    const combinations = matrixConfig?.combinations || [];
+    const multipleSelection = pregunta.multipleSelection || false;
+    const preguntaId = pregunta.id;
+    return `<div id="matrix-container-${preguntaId}" class="space-y-4"><div class="overflow-x-auto"><table class="min-w-full bg-white border"><thead><tr><th class="px-4 py-3 bg-gray-50"></th>${columns.map(col => `<th class="px-6 py-3 text-center bg-gray-50"><div class="flex flex-col items-center"><span class="text-lg font-bold ${col.color === 'secondary' ? 'text-secondary' : 'text-accent'}">${col.label}</span><span class="text-xs text-gray-500">Impacto</span></div></th>`).join('')}</tr></thead><tbody>${rows.map(row => `<tr><td class="px-4 py-4 font-bold text-center bg-gray-50"><div><span class="text-lg font-bold ${row.color === 'secondary' ? 'text-secondary' : 'text-accent'}">${row.label}</span><span class="text-xs text-gray-500 block">Probabilidad</span></div></td>${columns.map(col => { const combo = combinations.find(c => c.row === row.value && c.col === col.value); const comboLabel = combo ? combo.label : `${row.label}-${col.label}`; return `<td class="px-4 py-4 text-center"><label class="inline-flex items-center"><input type="checkbox" class="matrix-checkbox w-6 h-6 border-2 rounded-lg" data-row="${row.value}" data-col="${col.value}" data-combo="${comboLabel}" onchange="handleMatrixSelection(${preguntaId}, this, ${multipleSelection})"></label><div class="text-xs text-gray-500">${combo?.description || ''}</div></td>`; }).join('')}</tr>`).join('')}</tbody></table></div><input type="hidden" id="respuesta_${preguntaId}"></div>`;
+  }
+
+  // ==================== RESTAURACIÓN DE VALORES ====================
+  function restaurarValoresPregunta(pregunta) {
+    const respuestaGuardada = respuestas[pregunta.id];
+    if (!respuestaGuardada) return;
+    switch (pregunta.tipo) {
+      case 'matrix-checkbox':
+        restaurarMatriz(pregunta.id, respuestaGuardada);
+        break;
+      default:
+        const campo = document.querySelector(`#respuesta_${pregunta.id}`);
+        if (campo) campo.value = respuestaGuardada;
+        break;
     }
+  }
 
-    // Actualizar el hidden field
+
+  function restaurarMatriz(preguntaId, respuestaGuardada) {
+    let saved = typeof respuestaGuardada === 'string' ? JSON.parse(respuestaGuardada) : respuestaGuardada;
+    if (!saved) return;
+    const multiple = preguntas.find(p => p.id === preguntaId)?.multipleSelection || false;
+    window.matrixSelections[preguntaId] = { selected: null, multiple, combinations: {} };
+    const checkboxes = document.querySelectorAll(`#matrix-container-${preguntaId} .matrix-checkbox`);
+    if (!multiple && typeof saved === 'string') {
+      const cb = Array.from(checkboxes).find(cb => cb.dataset.combo === saved);
+      if (cb) cb.checked = true;
+      window.matrixSelections[preguntaId].selected = saved;
+    } else if (multiple && Array.isArray(saved)) {
+      saved.forEach(combo => {
+        const cb = Array.from(checkboxes).find(cb => cb.dataset.combo === combo);
+        if (cb) { cb.checked = true; window.matrixSelections[preguntaId].combinations[combo] = true; }
+      });
+    }
     updateMatrixHiddenField(preguntaId);
   }
 
-  function showMatrixFeedback(preguntaId, selection, type) {
-    const feedbackDiv = document.getElementById(`matrix-feedback-${preguntaId}`);
-    if (!feedbackDiv) return;
 
-    if (selection) {
-      feedbackDiv.className = `text-sm text-center p-3 rounded-lg ${type === 'success' ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'}`;
-      feedbackDiv.innerHTML = `
-      <i class="fas ${type === 'success' ? 'fa-check-circle' : 'fa-info-circle'} mr-1"></i>
-      Selección actual: <strong>${selection}</strong>
-    `;
-      feedbackDiv.classList.remove('hidden');
+  function handleMatrixSelection(preguntaId, checkbox, multiple) {
+    const combo = checkbox.dataset.combo;
+    if (!window.matrixSelections[preguntaId]) window.matrixSelections[preguntaId] = { selected: null, multiple, combinations: {} };
+    const sel = window.matrixSelections[preguntaId];
+    if (!multiple) {
+      if (checkbox.checked) {
+        document.querySelectorAll(`#matrix-container-${preguntaId} .matrix-checkbox`).forEach(cb => { if (cb !== checkbox) cb.checked = false; });
+        sel.selected = combo;
+      } else sel.selected = null;
     } else {
-      feedbackDiv.classList.add('hidden');
+      if (checkbox.checked) sel.combinations[combo] = true;
+      else delete sel.combinations[combo];
     }
+    updateMatrixHiddenField(preguntaId);
   }
 
   function updateMatrixHiddenField(preguntaId) {
-    const hiddenField = document.getElementById(`respuesta_${preguntaId}`);
-    const selections = matrixSelections[preguntaId];
-
-    let dataToSave = null;
-
-    if (selections) {
-      if (!selections.multiple) {
-        // Selección única
-        dataToSave = selections.selected;
-      } else {
-        // Selección múltiple
-        dataToSave = Object.keys(selections.combinations);
-      }
-    }
-
-    if (hiddenField) {
-      hiddenField.value = JSON.stringify(dataToSave);
-    }
-
-    if (respuestas) {
-      respuestas[preguntaId] = JSON.stringify(dataToSave);
-    }
-  }
-
-  // Función para restaurar la matriz al navegar
-  function restaurarMatriz(preguntaId, respuestaGuardada) {
-    try {
-      let savedData;
-      if (typeof respuestaGuardada === 'string') {
-        savedData = JSON.parse(respuestaGuardada);
-      } else {
-        savedData = respuestaGuardada;
-      }
-
-      if (!savedData) return;
-
-      const pregunta = preguntas.find(p => p.id === preguntaId);
-      const multipleSelection = pregunta?.multipleSelection || false;
-
-      // Inicializar selecciones
-      matrixSelections[preguntaId] = {
-        selected: null,
-        multiple: multipleSelection,
-        combinations: {}
-      };
-
-      const allCheckboxes = document.querySelectorAll(`#matrix-container-${preguntaId} .matrix-checkbox`);
-
-      if (!multipleSelection) {
-        // Restaurar selección única
-        const checkboxToSelect = Array.from(allCheckboxes).find(cb =>
-          cb.getAttribute('data-combo') === savedData
-        );
-        if (checkboxToSelect) {
-          checkboxToSelect.checked = true;
-          matrixSelections[preguntaId].selected = savedData;
-          showMatrixFeedback(preguntaId, savedData, 'success');
-        }
-      } else {
-        // Restaurar selección múltiple
-        if (Array.isArray(savedData)) {
-          savedData.forEach(combo => {
-            const checkbox = Array.from(allCheckboxes).find(cb =>
-              cb.getAttribute('data-combo') === combo
-            );
-            if (checkbox) {
-              checkbox.checked = true;
-              matrixSelections[preguntaId].combinations[combo] = true;
-            }
-          });
-          if (savedData.length > 0) {
-            showMatrixFeedback(preguntaId, savedData.join(', '), 'info');
-          }
-        }
-      }
-
-      updateMatrixHiddenField(preguntaId);
-
-    } catch (e) {
-      console.error('Error restaurando matriz:', e);
-    }
-  }
-
-  // Detectar si hay scroll horizontal y mostrar indicador
-  function checkHorizontalScroll(preguntaId) {
-    const container = document.getElementById(`dynamic-table-${preguntaId}`);
-    if (!container) return;
-
-    const hasScroll = container.scrollWidth > container.clientWidth;
-    const indicator = container.parentElement?.querySelector('.dynamic-table-scroll-indicator');
-
-    if (indicator && hasScroll) {
-      indicator.classList.remove('hidden');
-      indicator.classList.add('flex');
-    } else if (indicator) {
-      indicator.classList.add('hidden');
-      indicator.classList.remove('flex');
-    }
+    const hidden = document.getElementById(`respuesta_${preguntaId}`);
+    const sel = window.matrixSelections[preguntaId];
+    let value = sel?.multiple ? Object.keys(sel.combinations) : (sel?.selected || null);
+    hidden.value = JSON.stringify(value);
+    respuestas[preguntaId] = hidden.value;
   }
 
 
-  function removeTableRow(button, preguntaId) {
-    if (!preguntaId) {
-      console.error('preguntaId no definido');
-      return;
-    }
+  function escapeHtml(str) { if (!str) return ''; return str.replace(/[&<>]/g, function (m) { if (m === '&') return '&amp;'; if (m === '<') return '&lt;'; if (m === '>') return '&gt;'; return m; }); }
 
-    if (!button) {
-      console.error('Botón no definido');
-      return;
-    }
-
-    let row = null;
-    try {
-      row = button.closest('tr');
-    } catch (error) {
-      console.error('Error al buscar la fila:', error);
-      return;
-    }
-
-    if (!row) {
-      console.error('No se encontró la fila padre');
-      mostrarToast('Error: No se pudo eliminar la fila', 'error');
-      return;
-    }
-
-    const tbody = row.parentElement;
-    if (!tbody) {
-      console.error('No se encontró el tbody');
-      return;
-    }
-
-    // ✅ ID consistente: dynamic-table-${preguntaId}
-    const container = document.getElementById(`dynamic-table-${preguntaId}`);
-    if (!container) {
-      console.error(`No se encontró el contenedor dynamic-table-${preguntaId}`);
-      return;
-    }
-
-    const min = parseInt(container.dataset?.min || 1);
-    const currentRows = tbody.querySelectorAll('.table-row').length;
-
-    if (currentRows <= min) {
-      mostrarToast(`Mínimo ${min} ${min === 1 ? 'fila' : 'filas'} requerida(s)`, 'warning');
-      return;
-    }
-
-    row.remove();
-
-    const rows = tbody.querySelectorAll('.table-row');
-    rows.forEach((row, newIndex) => {
-      try {
-        row.setAttribute('data-row-index', newIndex);
-        const inputs = row.querySelectorAll('input, select, textarea');
-        inputs.forEach(input => {
-          input.setAttribute('data-row', newIndex);
-        });
-      } catch (error) {
-        console.error('Error al reindexar fila:', error);
-      }
-    });
-
-    updateTableCounter(preguntaId);
-    updateTableHiddenField(preguntaId);
-    checkHorizontalScroll(preguntaId);
+  function mostrarToast(msg, tipo = 'info') {
+    const container = document.getElementById('toastContainer');
+    const toast = document.createElement('div');
+    const colores = { success: 'bg-green-500', error: 'bg-red-500', warning: 'bg-yellow-500', info: 'bg-blue-500' };
+    const iconos = { success: 'fa-check-circle', error: 'fa-exclamation-circle', warning: 'fa-exclamation-triangle', info: 'fa-info-circle' };
+    toast.className = `${colores[tipo]} text-white px-6 py-3 rounded-lg shadow-lg flex items-center space-x-3 animate-slide-up`;
+    toast.innerHTML = `<i class="fas ${iconos[tipo]} text-xl"></i><span>${msg}</span>`;
+    container.appendChild(toast);
+    setTimeout(() => { toast.style.opacity = '0'; toast.style.transform = 'translateX(100px)'; setTimeout(() => toast.remove(), 300); }, 3000);
   }
 
-
-  function generarFilaTablaResponsive(columns, preguntaId, rowIndex, rowData = {}) {
-    const row = document.createElement('tr');
-    row.className = 'table-row hover:bg-gray-50 transition-colors border-b';
-    row.setAttribute('data-row-index', rowIndex);
-
-    let cellsHtml = '';
-
-    columns.forEach((col, colIndex) => {
-      const value = rowData[col.name] || '';
-      const inputId = `cell_${preguntaId}_${rowIndex}_${colIndex}`;
-
-      switch (col.type) {
-        case 'select':
-          cellsHtml += `
-          <td class="px-4 py-2 align-top">
-            <select class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-secondary focus:ring-2 focus:ring-secondary focus:ring-opacity-20 transition-all text-sm"
-                    data-pregunta="${preguntaId}"
-                    data-row="${rowIndex}"
-                    data-col="${colIndex}"
-                    data-col-name="${col.name}"
-                    ${col.required ? 'required' : ''}
-                    onchange="updateTableHiddenField(${preguntaId})">
-              <option value="">${col.placeholder || 'Selecciona...'}</option>
-              ${col.options.map(opt => `<option value="${opt}" ${value === opt ? 'selected' : ''}>${opt}</option>`).join('')}
-            </select>
-            ${col.help ? `<p class="text-xs text-gray-400 mt-1 hidden md:block">${col.help}</p>` : ''}
-           </td>
-        `;
-          break;
-
-        case 'textarea':
-          cellsHtml += `
-          <td class="px-4 py-2 align-top">
-            <textarea rows="2"
-                      class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-secondary focus:ring-2 focus:ring-secondary focus:ring-opacity-20 transition-all resize-y text-sm"
-                      placeholder="${col.placeholder || 'Describe...'}"
-                      data-pregunta="${preguntaId}"
-                      data-row="${rowIndex}"
-                      data-col="${colIndex}"
-                      data-col-name="${col.name}"
-                      ${col.required ? 'required' : ''}
-                      oninput="updateTableHiddenField(${preguntaId})">${escapeHtml(value)}</textarea>
-            ${col.help ? `<p class="text-xs text-gray-400 mt-1 hidden md:block">${col.help}</p>` : ''}
-           </td>
-        `;
-          break;
-
-        default:
-          cellsHtml += `
-          <td class="px-4 py-2 align-top">
-            <input type="${col.type || 'text'}" 
-                   class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-secondary focus:ring-2 focus:ring-secondary focus:ring-opacity-20 transition-all text-sm"
-                   placeholder="${col.placeholder || 'Ingresa información...'}"
-                   value="${escapeHtml(value)}"
-                   data-pregunta="${preguntaId}"
-                   data-row="${rowIndex}"
-                   data-col="${colIndex}"
-                   data-col-name="${col.name}"
-                   ${col.required ? 'required' : ''}
-                   oninput="updateTableHiddenField(${preguntaId})">
-            ${col.help ? `<p class="text-xs text-gray-400 mt-1 hidden md:block">${col.help}</p>` : ''}
-           </td>
-        `;
-          break;
-      }
-    });
-
-    cellsHtml += `
-    <td class="px-4 py-2 text-center align-top sticky right-0 bg-white shadow-[-2px_0_5px_-2px_rgba(0,0,0,0.1)]">
-      <button type="button" 
-              onclick="removeTableRow(this, ${preguntaId})"
-              class="text-red-500 hover:text-red-700 transition-colors p-2 rounded-lg hover:bg-red-50">
-        <i class="fas fa-trash-alt text-lg"></i>
-      </button>
-    </td>
-  `;
-
-    row.innerHTML = cellsHtml;
-    return row;
-  }
-
-  // Función para actualizar el contador de filas
-  function updateTableCounter(preguntaId) {
-
-    const container = document.getElementById(`dynamic-table-${preguntaId}`);
-    const tbody = document.getElementById(`table-body-${preguntaId}`);
-
-    if (!container || !tbody) return;
-
-    const max = parseInt(container.dataset?.max || 20);
-    const currentRows = tbody.querySelectorAll('.table-row').length;
-    const counter = document.getElementById(`table-counter-${preguntaId}`);
-
-    if (counter) {
-      counter.innerHTML = `${currentRows} / ${max} filas`;
-    }
-
-    const addButton = document.getElementById(`btn-add-table-${preguntaId}`);
-    if (addButton) {
-      addButton.disabled = currentRows >= max;
-      if (currentRows >= max) {
-        addButton.classList.add('opacity-50', 'cursor-not-allowed');
-        addButton.classList.remove('hover:bg-opacity-20');
-      } else {
-        addButton.classList.remove('opacity-50', 'cursor-not-allowed');
-        addButton.classList.add('hover:bg-opacity-20');
-      }
-    }
-  }
-
-
-  function generarFilasBusinessCanvasResponsive(columns, preguntaId, numRows, rowLabels) {
-    let html = '';
-
-    for (let rowIndex = 0; rowIndex < numRows; rowIndex++) {
-      const bgColor = rowIndex === 0 ? 'bg-white' : 'bg-gradient-to-r from-blue-50 to-indigo-50';
-      const rowLabel = rowLabels[rowIndex] || {};
-
-      html += `
-      <tr class="table-row hover:bg-gray-50 transition-colors border-b" data-row-index="${rowIndex}" data-row-type="${rowIndex === 0 ? 'strategic' : 'operational'}">
-        ${columns.map((col, colIndex) => {
-        const inputId = `cell_${preguntaId}_${rowIndex}_${colIndex}`;
-
-        return `
-            <td class="px-3 py-3 border-r border-gray-200 last:border-r-0 align-top ${bgColor}" style="min-width: 180px;">
-              <div class="flex flex-col">
-                ${rowIndex === 0 ? `
-                  <div class="text-xs font-semibold text-secondary mb-2 border-b border-secondary pb-1">
-                    ${col.name}
-                  </div>
-                ` : ''}
-                <textarea rows="3"
-                          class="w-full px-3 py-2 border border-gray-200 rounded-lg focus:border-secondary focus:ring-2 focus:ring-secondary focus:ring-opacity-20 transition-all resize-y text-sm bg-transparent"
-                          placeholder="${rowIndex === 0 ? col.placeholder || 'Describe...' : (col.name === 'ESTRUCTURA DE COSTOS' ? '¿Cuánto te costará? ¿Cuánto cuesta llegar a nuestro cliente?' : 'Describe...')}"
-                          data-pregunta="${preguntaId}"
-                          data-row="${rowIndex}"
-                          data-col="${colIndex}"
-                          data-col-name="${col.name}"
-                          ${col.required ? 'required' : ''}
-                          oninput="updateBusinessCanvasField(${preguntaId}, ${rowIndex}, ${colIndex})"></textarea>
-                ${rowIndex === 1 && colIndex === 3 ? `
-                  <div class="text-xs text-gray-400 mt-1">
-                    <i class="fas fa-chart-line mr-1"></i> ¿De dónde vienen nuestros ingresos?
-                  </div>
-                ` : ''}
-              </div>
-            </td>
-          `;
-      }).join('')}
-      </tr>
-    `;
-
-      if (rowLabel.help) {
-        html += `
-        <tr class="bg-gray-50">
-          <td colspan="${columns.length}" class="px-3 py-1 text-xs text-gray-500 italic">
-            <i class="fas fa-info-circle mr-1 text-accent"></i> ${rowLabel.help}
-          </td>
-        </tr>
-      `;
-      }
-    }
-
-    return html;
-  }
-
-
-  function addBusinessCanvasRow(preguntaId) {
-    try {
-      if (!preguntaId) {
-        console.error('addBusinessCanvasRow: preguntaId no definido');
-        return;
-      }
-
-      const container = document.getElementById(`dynamic-table-${preguntaId}`);
-      const tbody = document.getElementById(`table-body-${preguntaId}`);
-
-      if (!container) {
-        console.error(`No se encontró el contenedor dynamic-table-${preguntaId}`);
-        mostrarToast('Error: No se pudo agregar la fila', 'error');
-        return;
-      }
-
-      if (!tbody) {
-        console.error(`No se encontró el tbody table-body-${preguntaId}`);
-        mostrarToast('Error: Estructura de tabla no encontrada', 'error');
-        return;
-      }
-
-      const max = parseInt(container.dataset?.max || 20);
-      const currentRows = tbody.querySelectorAll('.table-row').length;
-
-      if (currentRows >= max) {
-        mostrarToast(`Máximo ${max} filas permitidas`, 'warning');
-        return;
-      }
-
-      const pregunta = preguntas.find(p => p.id === preguntaId);
-      if (!pregunta) {
-        console.error(`No se encontró la pregunta con ID ${preguntaId}`);
-        return;
-      }
-
-      const columns = pregunta.columns || [];
-      const rows = pregunta.rows || 2;
-      const rowLabels = pregunta.rowLabels || [];
-      const newRowIndex = currentRows;
-
-      // Determinar el tipo de fila (estratégica u operativa) basado en el índice
-      const rowType = newRowIndex % 2 === 0 ? 'strategic' : 'operational';
-      const bgColor = rowType === 'strategic' ? 'bg-white' : 'bg-gradient-to-r from-blue-50 to-indigo-50';
-
-      // Crear nueva fila
-      let newRowHTML = `
-      <tr class="table-row hover:bg-gray-50 transition-colors border-b" data-row-index="${newRowIndex}" data-row-type="${rowType}">
-    `;
-
-      columns.forEach((col, colIndex) => {
-        newRowHTML += `
-        <td class="px-3 py-3 border-r border-gray-200 last:border-r-0 align-top ${bgColor}" style="min-width: 180px;">
-          <div class="flex flex-col">
-            <textarea rows="3"
-                      class="w-full px-3 py-2 border border-gray-200 rounded-lg focus:border-secondary focus:ring-2 focus:ring-secondary focus:ring-opacity-20 transition-all resize-y text-sm bg-transparent"
-                      placeholder="${col.placeholder || 'Describe...'}"
-                      data-pregunta="${preguntaId}"
-                      data-row="${newRowIndex}"
-                      data-col="${colIndex}"
-                      data-col-name="${col.name}"
-                      ${col.required ? 'required' : ''}
-                      oninput="updateBusinessCanvasField(${preguntaId}, ${newRowIndex}, ${colIndex})"></textarea>
-          </div>
-        </td>
-      `;
-      });
-
-      newRowHTML += '</tr>';
-
-      tbody.insertAdjacentHTML('beforeend', newRowHTML);
-
-      updateTableCounter(preguntaId);
-      updateBusinessCanvasHiddenField(preguntaId);
-      checkHorizontalScroll(preguntaId);
-
-    } catch (error) {
-      console.error('Error en addBusinessCanvasRow:', error);
-    }
-  }
-
-  // Función para actualizar campo del Business Canvas
-  function updateBusinessCanvasField(preguntaId, rowIndex, colIndex) {
-    updateBusinessCanvasHiddenField(preguntaId);
-  }
-
-  // Función para actualizar hidden field del Business Canvas
-  function updateBusinessCanvasHiddenField(preguntaId) {
-    const hiddenField = document.getElementById(`respuesta_${preguntaId}`);
-    const tbody = document.getElementById(`table-body-${preguntaId}`);
-    const pregunta = preguntas.find(p => p.id === preguntaId);
-
-    if (!tbody || !pregunta) return;
-
-    const columns = pregunta.columns || [];
-    const businessCanvasData = {
-      rows: []
-    };
-
-    const rows = tbody.querySelectorAll('.table-row');
-
-    rows.forEach((row, rowIndex) => {
-      const rowData = {};
-      columns.forEach((col, colIndex) => {
-        const textarea = row.querySelector(`[data-col="${colIndex}"]`);
-        if (textarea && textarea.value.trim()) {
-          rowData[col.name] = textarea.value.trim();
-        }
-      });
-      if (Object.keys(rowData).length > 0) {
-        businessCanvasData.rows.push(rowData);
-      }
-    });
-
-    const jsonData = JSON.stringify(businessCanvasData);
-    if (hiddenField) {
-      hiddenField.value = jsonData;
-    }
-    if (respuestas) {
-      respuestas[preguntaId] = jsonData;
-    }
-  }
-
-  // Dentro de Frontend/Js.html
-function finalizarYEnviar() {
-  const respuestasParaEnviar = {};
-  
-  // IMPORTANTE: Asegúrate de que tus respuestas se guarden con el ID como llave
-  // Ejemplo de cómo debería quedar el objeto: { "1": "Respuesta...", "2": "Respuesta..." }
-  preguntas.forEach((p, index) => {
-    // Aquí 'respuestas' es tu variable global donde guardas lo que escribe el usuario
-    respuestasParaEnviar[p.id] = respuestas[index]; 
-  });
-
-  // Mostrar loading
-  document.getElementById('loadingOverlay').classList.remove('hidden');
-
-  // ENVIAR AL SERVIDOR (Código.gs)
-  google.script.run
-    .withSuccessHandler(function(response) {
-      document.getElementById('loadingOverlay').classList.add('hidden');
-      alert("¡Plan generado con éxito!");
-    })
-    .withFailureHandler(function(err) {
-      document.getElementById('loadingOverlay').classList.add('hidden');
-      alert("Error: " + err.message);
-    })
-    .procesarFormulario(respuestasParaEnviar); // <--- Llamada a la función que creamos en Código.gs
-}
 
 </script>

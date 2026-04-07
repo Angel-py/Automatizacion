@@ -24,10 +24,10 @@ function guardarRespuestasEnSlides(respuestasOptimizadas) {
     sheet.appendRow(fila);
     sheet.autoResizeColumns(1, fila.length); 
 
-   
-    actualizarPresentacion(respuestasOptimizadas);
+    // Genera la presentación desde la plantilla con datos procesados por IA
+    const slideUrl = generarPresentacionDeUltimaFila();
     
-    return true;
+    return slideUrl;
   } catch (error) {
     console.error("Error completo: " + error.stack);
     throw new Error("Error en el proceso: " + error.message);
